@@ -1,83 +1,67 @@
-# CLAUDE.md — parameter-golf 项目指引
+# CLAUDE.md — golf 项目指引
 
-## 项目概述
+一切回答使用中文。
 
-OpenAI Parameter Golf 挑战赛：在 16MB artifact + 10分钟 8×H100 约束下，训练最优语言模型（评估指标：FineWeb val_bpb）。
+本仓库已经从 Parameter Golf 比赛项目转型为 golf。当前目标是复用现有公开语料、tokenizer 和训练基础，逐步实现候选生成、自动排词模型、本地推理和客户端输入法体验。
 
-## 仓库结构
+## 项目入口
 
-- `train_gpt.py` — 原版训练脚本（标准9层堆叠 + U-Net skip）
-- `plan1.py` — 改进方案（Depth Recurrence + QAT + Outlier Isolation）
-- `train_gpt_origin.py` — 原始 baseline 备份，不要修改
-- `train_gpt_mlx.py` — Apple MLX 版，非主力方案
-- `data/` — 数据集和 tokenizer
-- `records/` — 历史实验记录（只读参考，不要修改已有记录）
-- `experiments.md` — 实验对比记录表，每次跑完实验必须更新
-- `修改记录.md` — 修改留痕，每次改动必须更新
+- GitHub 仓库：`https://github.com/3516027002att-ui/Golf-Input-Method`
+- 当前展示名：`golf`
+- 本地目录名可能仍是 `parameter-golf`；后续协作以 GitHub 仓库 `Golf-Input-Method` 和项目名 `golf` 为准。
 
-## 硬约束（不可违反）
+## 当前定位
 
-1. **16MB 上限**：代码字节 + 压缩模型字节 ≤ 16,000,000 bytes（十进制，非 MiB）
-2. **10分钟训练**：`max_wallclock_seconds=600`，不可放宽
-3. **评估不可访问训练数据**：推理时禁止读取训练集
-4. **验证集不可用于训练**：不可在评估前对验证集做 test-time training
-5. **自包含**：评估时禁止外部下载或网络调用
-6. **SOTA 提交门槛**：必须比当前 SOTA 好 ≥ 0.005 nats，p < 0.01（通常需要 3 个 seed）
+- `train_gpt.py`：保留为可复用训练基线，后续需要重构为排词模型训练入口。
+- `data/`：保留为当前最重要的数据资产目录。
+- `src/input_method/`：当前本地输入法原型代码。
+- `tests/`：当前最小单元测试。
+- 历史比赛脚本、日志、checkpoint、模型产物和实验记录不再作为当前项目工作流的一部分。
+- 当前尚未实现正式输入法客户端、推理服务、排词训练 CLI 或模型导出格式。
 
-## 当前状态
+## 工作原则
 
-- 当前 SOTA：val_bpb = **1.1428**（10L Int5MLP + BigramHash + SWA）
-- 基于 `train_gpt.py` 的最佳配置
-- `plan1.py` 尚未跑出结果，待验证
+优先级：
 
-## 工作流约束
+1. 不新增技术债
+2. 正确性与可验证性
+3. 隐私、安全与凭据合规
+4. 与现有数据和代码边界保持一致
+5. 交付速度与改动体量
 
-### 修改代码前
+工程底线：
 
-- 先读 `experiments.md` 了解历史实验和已验证的改进方向
-- 先读目标文件，理解现有逻辑再动手
-- 确认改动不会突破 16MB 限制（可用 `wc -c` 估算）
+- 不编造能力、指标、命令或验证结果。
+- 不把历史比赛分数当作当前输入法质量。
+- 不在仓库中写入明文凭据或用户隐私样本。
+- 不通过关闭校验、吞异常、硬编码路径来获得表面成功。
+- 非必要不引入新依赖。
 
-### 修改代码时
+## 目标架构
 
-- `train_gpt.py` 和 `plan1.py` 是两套独立方案，改一个不要影响另一个
-- 不要动 `records/` 下的已有实验记录
-- 不要动 `train_gpt_origin.py`（原始备份）
-- 新实验配置优先通过环境变量控制，不要硬编码到脚本里
-- 量化相关改动必须验证 roundtrip（量化→反量化→推理）不会 break
+AI 输入法按以下模块推进：
 
-### 修改代码后
+- 客户端输入层：输入缓冲区、候选栏、用户选择事件。
+- 候选生成层：词典、规则召回、上下文候选和补全文本。
+- 自动排词模型：基于上下文和候选列表输出排序分数。
+- 本地推理层：低延迟、离线可用、隐私默认安全。
+- 评估与导出层：首选命中率、Top-K 命中率、延迟、内存和加载校验。
 
-- 更新 `修改记录.md`
-- 语法检查：`python -m py_compile <文件>`
-- 行数检查：确认不超过合理范围（当前 train_gpt.py ~1287行，plan1.py ~1476行）
-- 如果跑了训练，把结果填入 `experiments.md`
+## 修改前检查
 
-### 跑实验
+- 先读 `README.md`、`data/README.md` 和目标文件。
+- 涉及训练逻辑时先读 `train_gpt.py`，区分可复用训练基础和历史比赛包袱。
+- 涉及数据时确认不会误删 `data/datasets/`、`data/tokenizers/`、`LICENSE` 或 `THIRD_PARTY_NOTICES.md`。
 
-- 本地 GPU：NVIDIA GeForce RTX 4060 Laptop (8GB VRAM)，CUDA 12.7，支持本地训练
-- 单次训练+验证约 12~13 分钟
-- 3 seed 串行约 40 分钟
-- 启动命令模板：
-  ```bash
-  RUN_ID=<实验名> \
-  DATA_PATH=./data/datasets/fineweb10B_sp1024/ \
-  TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
-  VOCAB_SIZE=1024 \
-  torchrun --standalone --nproc_per_node=8 train_gpt.py
-  ```
+## 修改后要求
 
-## 关键技术栈
+- 同步更新相关文档和 `修改记录.md`。
+- 按风险运行最小验证：语法检查、数据 smoke、训练 smoke、推理 smoke、导出 roundtrip 或接口测试。
+- 如果没有运行验证，必须在汇报中明确说明。
 
-- PyTorch（CUDA）、Muon + Adam 混合优化器
-- Int5/Int6/Int8 量化 + zstd/zlib 压缩
-- Sliding Window Eval（stride=64）
-- SWA（Stochastic Weight Averaging）
-- SmearGate、BigramHash、OrthoInit
+## 数据与隐私
 
-## 改进方向优先级
-
-1. 验证 plan1.py（Depth Recurrence + QAT + OI）是否超越当前 SOTA
-2. 调优 plan1 的超参（loop数、shared block数、OI topk）
-3. 探索更激进的量化（Int4 + OI）
-4. 架构创新（新的参数共享方式、更高效的注意力机制）
+- 公开语料可用于构造排词训练任务。
+- 真实输入法日志默认不采集。
+- 后续个性化学习必须提供显式开关、脱敏、本地删除和最小化字段策略。
+- 不允许提交用户输入原文、剪贴板内容、账号信息、私有词库或凭据。

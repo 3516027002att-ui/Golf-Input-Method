@@ -1,66 +1,61 @@
-# Data Workflows
+# 数据资产说明
 
-This directory contains the dataset download helpers and export scripts used for the challenge.
+`data/` 目录保存 golf 当前可复用的数据和 tokenizer 资产。它们来自公开语料处理流程，可作为自动排词模型的启动语料，但不等同于真实输入法用户日志。
 
-Canonical local layout:
-- `data/datasets/<dataset_name>/`
+## 当前布局
+
+- `data/datasets/fineweb10B_sp1024/`
+  - 公开语料分词后的二进制 shard。
+  - 可用于预训练、语言建模基线、候选排序样本构造和数据处理 smoke。
 - `data/tokenizers/`
-- `data/manifest.json`
-- `data/docs_selected.jsonl`
-- `data/docs_selected.source_manifest.json`
+  - `fineweb_1024_bpe.model`
+  - `fineweb_1024_bpe.vocab`
+- `data/tokenizer_specs.json`
+  - tokenizer 规格。
+- `data/cached_challenge_fineweb.py`
+  - 现有数据缓存下载脚本，保留用于重建公开语料缓存。
+- `data/download_hf_docs_and_tokenize.py`
+  - 文档下载与重新分词脚本，保留用于后续数据重建或 tokenizer 实验。
 
-## Downloading Published Data
+## 已知缓存
 
-Download the cached FineWeb export for a tokenizer variant with:
+当前主缓存目录为：
 
-```bash
-python3 data/cached_challenge_fineweb.py --variant sp1024
+```text
+data/datasets/fineweb10B_sp1024/
 ```
 
-This populates `./data/datasets/fineweb10B_sp1024/` and `./data/tokenizers/`.
-By default it downloads the full validation split and 8B training tokens (80 train shards).
+历史审计口径：
 
-To fetch more training shards, pass `--train-shards`:
+- 训练分片：`fineweb_train_*.bin`
+- 验证分片：`fineweb_val_000000.bin`
+- tokenizer：`data/tokenizers/fineweb_1024_bpe.model`
 
-```bash
-python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 180
-```
+实施训练或清理前，应先确认这些文件仍存在。不要把 `data/datasets/` 和 `data/tokenizers/` 当作比赛遗留产物删除。
 
-The downloader is manifest-driven and can fetch only a prefix of train shards from a larger published export. With the current shard size of `100_000_000` tokens, `10B` retokenized training tokens is `100` train shards:
+## 在 golf 中的用途
 
-```bash
-MATCHED_FINEWEB_REPO_ID=your-hf-username/your-dataset-repo \
-MATCHED_FINEWEB_REMOTE_ROOT_PREFIX=your_50B_export_root \
-python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
-```
+公开语料可用于：
 
-Validation is always downloaded in full from the fixed `fineweb_val_*` split. Training on the first `N` train shards means training on the prefix of the same frozen shuffled export, so the data order stays aligned with the baseline for that tokenizer family.
+- 构造上下文窗口和候选排序样本。
+- 训练通用排词模型的初始表示。
+- 评估候选排序模型在公开文本上的泛化能力。
+- 验证数据加载、batch 构造和 tokenizer roundtrip。
 
-The default published repo is `willdepueoai/parameter-golf`, with the export rooted under the repo subdirectory `datasets/`.
+公开语料不能直接代表：
 
-## Rebuilding Tokenizers From Published Docs
+- 用户真实输入习惯。
+- 拼音到汉字候选召回质量。
+- 个性化词库效果。
+- 输入法候选栏交互体验。
 
-To retrain a tokenizer or re-export shards from exactly the same selected documents, run the standalone retokenizer against the published docs cache:
+## 后续数据方向
 
-```bash
-python3 data/download_hf_docs_and_tokenize.py \
-  --repo-id your-hf-username/your-dataset-repo \
-  --remote-root your_50B_export_root \
-  --output-root /tmp/my_custom_tokenizer_export \
-  --tokenizer-config ./data/tokenizer_specs.json
-```
+后续应新增独立的数据构造流程，至少包含：
 
-The sidecar `docs_selected.source_manifest.json` includes `docs_sha256`, so users can verify they are rebuilding from the exact same document list and order as the baseline export.
+- 排词样本格式：上下文、候选列表、目标候选、样本来源和可选权重。
+- 候选生成来源：词典、规则召回、语言模型补全或其他召回器。
+- 数据切分：训练、验证、测试按来源和时间隔离。
+- 评估指标：首选命中率、Top-K 命中率、平均排序损失和推理延迟。
 
-## Useful Knobs
-
-For CPU-heavy exports, useful knobs are:
-
-```bash
-MATCHED_FINEWEB_SP_BATCH_SIZE=2048
-MATCHED_FINEWEB_TOKENIZER_THREADS=16
-MATCHED_FINEWEB_TIKTOKEN_THREADS=16
-MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE=512
-```
-
-These control batched tokenizer encoding during shard export, tokenizer thread count, tiktoken thread count, and batched GPT-2 decode for the blobstore docs-cache path.
+任何用户输入日志都必须默认关闭采集。只有在用户明确授权后，才能在本地最小化记录，并且必须提供脱敏和删除机制。
