@@ -25,22 +25,18 @@
 ## 快速启动与命令手册
 
 ### 启动命令
-- **桌面双击启动（无需命令行）**：
-  ```bash
-  scripts\launch_golf.bat          # Windows 桌面双击即可
-  ```
-- **后台启动器（单实例保护）**：
-  ```bash
-  python -m src.input_method.tray_app
-  ```
-- **GUI 编辑器（命令行启动）**：
-  ```bash
-  python -m src.input_method.app
-  ```
-- **终端模拟器**：
-  ```bash
-  python -m src.input_method.main
-  ```
+
+| 模式 | 命令 | 说明 |
+|------|------|------|
+| **系统 IME** 🆕 | `python -m src.input_method.ime_app` | **全局键盘钩子，可在任意应用（记事本/浏览器等）中使用** |
+| 桌面双击 | `scripts\launch_golf.bat` | 启动系统 IME 模式 |
+| GUI 编辑器 | `python -m src.input_method.app` | 自带编辑器的 Demo 原型 |
+| 终端模拟器 | `python -m src.input_method.main` | 命令行交互测试 |
+| 后台启动器 | `python -m src.input_method.tray_app` | 单实例保护后台入口 |
+
+**系统 IME 模式快捷键**：
+- `Ctrl+Shift`：切换中/英文模式
+- 关闭控制台窗口：退出 IME
 
 ### 评估与测试命令
 - **候选质量评估**：
