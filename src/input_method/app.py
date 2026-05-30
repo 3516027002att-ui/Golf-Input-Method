@@ -24,9 +24,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="golf AI 输入法图形客户端")
     parser.add_argument(
         "--mode", "-m",
-        choices=["pinyin", "english"],
+        choices=["pinyin", "english", "japanese"],
         default="pinyin",
-        help="指定初始输入法模式: pinyin (中文拼音) 或 english (英文前缀补全)，默认为 pinyin"
+        help="指定初始输入法模式: pinyin (中文拼音), english (英文前缀补全) 或 japanese (日语罗马字假名)，默认为 pinyin"
     )
     parser.add_argument(
         "--page-size", "-p",
@@ -44,6 +44,18 @@ def main() -> None:
         type=str,
         default=None,
         help="排词模型权重路径"
+    )
+    parser.add_argument(
+        "--dict-path",
+        type=str,
+        default=None,
+        help="外部词表路径"
+    )
+    parser.add_argument(
+        "--user-memory-path",
+        type=str,
+        default=None,
+        help="用户记忆持久化路径"
     )
     parser.add_argument(
         "--show-console",
@@ -64,6 +76,10 @@ def main() -> None:
         use_model_rerank=args.use_model,
         model_path=args.model_path
     )
+    if args.dict_path:
+        config.dict_path = args.dict_path
+    if args.user_memory_path:
+        config.user_dict_path = args.user_memory_path
 
     engine = InputMethodEngine(config)
 

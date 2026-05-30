@@ -12,6 +12,9 @@
   - `fineweb_1024_bpe.vocab`
 - `data/tokenizer_specs.json`
   - tokenizer 规格。
+- `data/lexicon/`
+  - `dict.jsonl`
+  - 小型示例外部高频字词库（JSONL 格式），可用作召回与传统排序测试基线。
 - `data/cached_challenge_fineweb.py`
   - 现有数据缓存下载脚本，保留用于重建公开语料缓存。
 - `data/download_hf_docs_and_tokenize.py`

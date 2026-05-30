@@ -73,7 +73,12 @@ class CliSimulator:
         print()
 
         # 3. 绘制输入缓冲区 (Composing Text)
-        mode_indicator = "拼音" if self.engine.config.mode == "pinyin" else "英文"
+        if self.engine.config.mode == "pinyin":
+            mode_indicator = "拼音"
+        elif self.engine.config.mode == "japanese":
+            mode_indicator = "日语"
+        else:
+            mode_indicator = "英文"
         comp_text = self.engine.composing
         if comp_text:
             # 模拟输入法正在输入时，字符下方有下划线，且光标闪烁
@@ -207,7 +212,13 @@ class CliSimulator:
                     elif cmd == "/clear":
                         self.engine.clear()
                     elif cmd == "/mode":
-                        new_mode = "english" if self.engine.config.mode == "pinyin" else "pinyin"
+                        current_mode = self.engine.config.mode
+                        if current_mode == "pinyin":
+                            new_mode = "english"
+                        elif current_mode == "english":
+                            new_mode = "japanese"
+                        else:
+                            new_mode = "pinyin"
                         self.engine.switch_mode(new_mode)
                     self.draw_ui()
                 else:

@@ -20,7 +20,12 @@ def run_fallback_simulator(engine: InputMethodEngine) -> None:
     print("=" * 60)
 
     while True:
-        mode_str = "拼音" if engine.config.mode == "pinyin" else "英文"
+        if engine.config.mode == "pinyin":
+            mode_str = "拼音"
+        elif engine.config.mode == "japanese":
+            mode_str = "日语"
+        else:
+            mode_str = "英文"
         print(f"\n[已提交历史]: {engine.committed_history if engine.committed_history else '(空)'}")
         print(f"[当前缓冲区 ({mode_str})]: {engine.composing if engine.composing else '(空)'}")
         
@@ -44,7 +49,13 @@ def run_fallback_simulator(engine: InputMethodEngine) -> None:
             print("已退出模拟器。")
             break
         elif user_input == "/mode":
-            new_mode = "english" if engine.config.mode == "pinyin" else "pinyin"
+            current_mode = engine.config.mode
+            if current_mode == "pinyin":
+                new_mode = "english"
+            elif current_mode == "english":
+                new_mode = "japanese"
+            else:
+                new_mode = "pinyin"
             engine.switch_mode(new_mode)
             print(f"模式已切换为: {new_mode.upper()}")
             continue
@@ -72,9 +83,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="golf AI 输入法框架模拟端入口")
     parser.add_argument(
         "--mode", "-m",
-        choices=["pinyin", "english"],
+        choices=["pinyin", "english", "japanese"],
         default="pinyin",
-        help="指定初始输入法模式: pinyin (中文拼音) 或 english (英文前缀补全)，默认为 pinyin"
+        help="指定初始输入法模式: pinyin (中文拼音), english (英文前缀补全) 或 japanese (日语罗马字假名)，默认为 pinyin"
     )
     parser.add_argument(
         "--page-size", "-p",
@@ -93,6 +104,18 @@ def main() -> None:
         default=None,
         help="排词模型权重路径"
     )
+    parser.add_argument(
+        "--dict-path",
+        type=str,
+        default=None,
+        help="外部词库加载路径"
+    )
+    parser.add_argument(
+        "--user-memory-path",
+        type=str,
+        default=None,
+        help="用户记忆持久化路径"
+    )
     
     args = parser.parse_args()
 
@@ -103,6 +126,10 @@ def main() -> None:
         use_model_rerank=args.use_model,
         model_path=args.model_path
     )
+    if args.dict_path:
+        config.dict_path = args.dict_path
+    if args.user_memory_path:
+        config.user_dict_path = args.user_memory_path
 
     # 启动引擎
     try:
