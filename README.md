@@ -45,8 +45,23 @@
   ```
 - **词库扩充/导入脚本**：
   ```bash
-  python scripts/import_lexicon.py
+  python scripts/import_lexicon.py --input <文件> --output <文件>
   ```
+- **合成词库生成 (10万级压测)**：
+  ```bash
+  python scripts/generate_synthetic_lexicon.py --count 100000
+  ```
+- **词库性能压测**：
+  ```bash
+  python scripts/benchmark_lexicon.py --dict-path <词库文件>
+  ```
+
+### 工业级词库压测结果 (10 万 smoke)
+```
+生成: 100,000 条 → 导入去重: 99,449 条
+加载耗时: 0.231s  |  P95 查询: 22.06ms  |  内存: 46.5MB
+✅ 10 万级词库加载达标
+```
 
 ### 交互操作与快捷键
 - **composing 缓冲区输入**：在中文/日语/英文模式下，直接输入字母即可触发匹配。

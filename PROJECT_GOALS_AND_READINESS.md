@@ -465,4 +465,32 @@ Milestone E：更接近日用。
    - benchmark_latency.py
    - git diff --check
 9. 修改记录只能写最终验证结果，不得写中途结果。
-10. 如果最终态失败，必须写“未完成”，不得写“完成”。
+10. 如果最终态失败，必须写”未完成”，不得写”完成”。
+
+## 十四、2026-05-30 补齐：词库方案 B & 10 万 smoke
+
+### 新增工具
+
+- `scripts/generate_synthetic_lexicon.py` — 生成 10 万级合成拼音词库用于工业级压测
+- `scripts/benchmark_lexicon.py` — 词库加载/查询/内存压测 (P50/P95/P99)
+- `data/lexicon/README.md` — 词库目录说明和操作流程
+
+### 10 万 smoke 结果 (方案 B)
+
+```
+python scripts/generate_synthetic_lexicon.py --count 100000 --output .smoke_data/lexicon_100k.jsonl
+→ 生成 100,000 条, 文件大小 10.4 MB, 耗时 0.52s
+
+python scripts/import_lexicon.py --input .smoke_data/lexicon_100k.jsonl --output .smoke_data/imported_lexicon.jsonl
+→ 去重后 99,449 条
+
+python scripts/benchmark_lexicon.py --dict-path .smoke_data/imported_lexicon.jsonl
+→ 加载耗时: 0.231s | P95 查询: 22.06ms | 内存: 46.5MB
+→ ✅ 10 万级词库加载达标
+```
+
+### 词库方案结论
+
+采用**方案 B**：无法合法提交真实大词库时，提供完整的词库生成、导入和压测工具。
+`data/lexicon/dict.jsonl` (~435 条) 是手工整理的无版权常用词示例，**不是工业级词库**。
+工具链可用于生成、导入和压测任意规模的词库。
