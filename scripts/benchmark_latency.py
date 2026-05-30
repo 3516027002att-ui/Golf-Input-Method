@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import numpy as np
 from typing import List
 
 # 将项目根目录加入到 Python 模块查找路径
@@ -9,6 +8,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.input_method.config import InputMethodConfig
 from src.input_method.engine import InputMethodEngine
+
+
+def calculate_percentile(data: List[float], q: float) -> float:
+    """计算百分位数 (线性插值法)"""
+    if not data:
+        return 0.0
+    sorted_data = sorted(data)
+    n = len(sorted_data)
+    idx = (n - 1) * q / 100.0
+    idx_floor = int(idx)
+    idx_ceil = min(n - 1, idx_floor + 1)
+    if idx_floor == idx_ceil:
+        return sorted_data[idx_floor]
+    weight = idx - idx_floor
+    return sorted_data[idx_floor] * (1.0 - weight) + sorted_data[idx_ceil] * weight
 
 
 def run_benchmark() -> None:
@@ -54,13 +68,12 @@ def run_benchmark() -> None:
         latencies_ms.append(elapsed)
 
     # 计算分位数
-    latencies = np.array(latencies_ms)
-    count = len(latencies)
-    p50 = np.percentile(latencies, 50)
-    p95 = np.percentile(latencies, 95)
-    p99 = np.percentile(latencies, 99)
-    max_val = np.max(latencies)
-    avg_val = np.mean(latencies)
+    count = len(latencies_ms)
+    p50 = calculate_percentile(latencies_ms, 50.0)
+    p95 = calculate_percentile(latencies_ms, 95.0)
+    p99 = calculate_percentile(latencies_ms, 99.0)
+    max_val = max(latencies_ms) if latencies_ms else 0.0
+    avg_val = sum(latencies_ms) / count if count > 0 else 0.0
 
     print("-" * 60)
     print(f" 评测样本总按键数 : {count} 次")

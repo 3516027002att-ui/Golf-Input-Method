@@ -304,11 +304,29 @@ Milestone E：更接近日用。
 11. 新增性能 benchmark，输出 P50 / P95 / P99。
 12. 更新文档，明确当前仍未接入真实大语言模型排词。
 
-禁止：
-
-- 不改 UI 配色。
-- 不增加宣传性 AI 按钮。
-- 不写无法验证的体验描述。
-- 不只跑 `py_compile`。
 - 不把日语按钮说成完整日语输入法。
 - 不把临时内存加分说成用户词库。
+
+## 最终提交态验证强约束
+
+1. 所有验收均以最终工作区 / 最终提交态为准。
+2. 中途测试结果在后续任何文件写入后立即失效。
+3. 任何文件批量改写、格式化、行尾清理之后，必须重新跑完整最终验证。
+4. 禁止读写同一路径的 Python one-liner。
+5. 禁止用 `open(path, "w")` 和 `open(path, "r")` 在同一表达式或同一列表推导中处理同一路径。
+6. `py_compile` 只能证明语法可解析，不能证明模块包含所需类或功能。
+7. 提交前必须验证关键类可导入：
+   - InputMethodConfig
+   - InputMethodEngine
+   - PinyinCandidateGenerator
+   - FrequencyReranker
+   - GuiEditor
+   - GuiCandidateWindow
+8. 提交前必须运行：
+   - import smoke
+   - pytest
+   - evaluate_candidates.py
+   - benchmark_latency.py
+   - git diff --check
+9. 修改记录只能写最终验证结果，不得写中途结果。
+10. 如果最终态失败，必须写“未完成”，不得写“完成”。

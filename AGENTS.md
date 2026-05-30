@@ -106,6 +106,30 @@ golf 目标是构建一个 AI 输入法，核心能力包括：
 - 不允许把用户输入、剪贴板、账号信息或私有词库提交到仓库。
 - 不允许在评估报告里展示可识别个人身份的原文。
 
+## 最终提交态验证强约束
+
+1. 所有验收均以最终工作区 / 最终提交态为准。
+2. 中途测试结果在后续任何文件写入后立即失效。
+3. 任何文件批量改写、格式化、行尾清理之后，必须重新跑完整最终验证。
+4. 禁止读写同一路径的 Python one-liner。
+5. 禁止用 `open(path, "w")` 和 `open(path, "r")` 在同一表达式或同一列表推导中处理同一路径。
+6. `py_compile` 只能证明语法可解析，不能证明模块包含所需类或功能。
+7. 提交前必须验证关键类可导入：
+   - InputMethodConfig
+   - InputMethodEngine
+   - PinyinCandidateGenerator
+   - FrequencyReranker
+   - GuiEditor
+   - GuiCandidateWindow
+8. 提交前必须运行：
+   - import smoke
+   - pytest
+   - evaluate_candidates.py
+   - benchmark_latency.py
+   - git diff --check
+9. 修改记录只能写最终验证结果，不得写中途结果。
+10. 如果最终态失败，必须写“未完成”，不得写“完成”。
+
 ## 必读文件
 
 - `README.md`：当前项目目标和路线。
