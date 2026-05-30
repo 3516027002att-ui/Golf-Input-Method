@@ -39,6 +39,10 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_KEYUP = 0x0002
 
+# ── 64 位兼容：确保指针参数使用正确类型 ──
+ctypes.windll.user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+ctypes.windll.user32.CallNextHookEx.restype = ctypes.c_longlong
+
 # ── ctypes 结构定义 ──
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -340,11 +344,13 @@ class ImeBridge:
         root: Any,    # tk.Tk
         on_update_ui: Callable[[], None],
         on_commit_text: Callable[[str], None],
+        on_exit: Callable[[], None] = None,
     ):
         self.engine = engine
         self._root = root
         self._on_update_ui = on_update_ui
         self._on_commit_text = on_commit_text
+        self._on_exit = on_exit
         self._enabled = True
         self._pending_queue: queue.Queue[KeyEvent] = queue.Queue()
 
@@ -364,26 +370,32 @@ class ImeBridge:
         VK_OEM_MINUS, VK_OEM_PLUS, VK_PRIOR, VK_NEXT,
     }
 
-    # 中英切换相关的虚拟键码
+    # 中英切换 + 退出的虚拟键码
     VK_CONTROL = 0x11
     VK_SHIFT = 0x10
+    VK_Q = 0x51
 
     def handle_key_event(self, event: KeyEvent) -> bool:
-        """全局键盘事件入口（钩子线程调用）。返回 True 表示吞键。
-
-        只拦截 IME 可能处理的键；其余放行让目标应用正常接收。
-        """
+        """全局键盘事件入口（钩子线程调用）。返回 True 表示吞键。"""
         if not self._enabled:
             return False
 
         vk = event.vk_code
 
-        # Ctrl+Shift 切换中英文（任一方向）
+        # Ctrl+Shift+Q 退出 IME
+        if vk == self.VK_Q:
+            ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
+            shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
+            if ctrl and shift:
+                self._pending_queue.put(KeyEvent(vk, "", True))
+                return True
+
+        # Ctrl+Shift 切换中英文
         if vk == self.VK_SHIFT or vk == self.VK_CONTROL:
             ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
             shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
             if ctrl and shift:
-                self._pending_queue.put(KeyEvent(vk, "", True))  # 特殊标记
+                self._pending_queue.put(KeyEvent(vk, "", True))
                 return True
 
         # 英文模式完全不拦截
@@ -422,6 +434,15 @@ class ImeBridge:
         eng = self.engine
         vk = event.vk_code
         char = event.char
+
+        # Ctrl+Shift+Q 退出
+        if vk == self.VK_Q and not char:
+            ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
+            shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
+            if ctrl and shift and self._on_exit:
+                logger.info("热键退出 IME")
+                self._on_exit()
+                return
 
         # Ctrl+Shift 切换中英文
         if vk in (self.VK_SHIFT, self.VK_CONTROL) and not char:
@@ -520,8 +541,9 @@ class SystemImeHost:
         root: Any,
         on_candidate_update: Callable[[], None],
         on_text_commit: Callable[[str], None],
+        on_exit: Callable[[], None] = None,
     ):
-        self._bridge = ImeBridge(engine, root, on_candidate_update, on_text_commit)
+        self._bridge = ImeBridge(engine, root, on_candidate_update, on_text_commit, on_exit)
         self._hook = GlobalKeyboardHook(event_callback=self._bridge.handle_key_event)
         self._root = root
         self._polling = False

@@ -352,6 +352,7 @@ class GolfImeApp:
             engine=self.engine, root=self._root,
             on_candidate_update=self._update_candidate_ui,
             on_text_commit=self._commit_text,
+            on_exit=self.stop,
         )
         self._ime_host.start()
         self._running = True
