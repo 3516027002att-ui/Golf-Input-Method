@@ -88,6 +88,61 @@ class TestGeneratorsAndRerankers(unittest.TestCase):
         self.assertEqual(gen_py.generate_candidates(context_before="", composing=""), [])
         self.assertEqual(gen_en.generate_candidates(context_before="", composing=""), [])
 
+    # ── 键位误触纠错测试 (i/o/u) ──
+
+    def test_correction_o_to_i(self) -> None:
+        """测试 o→i 误触纠错：输入 'nohao' 应能抽出 '你好' 纠错候选"""
+        gen = PinyinCandidateGenerator()
+        cands = gen.generate_candidates(context_before="", composing="nohao")
+        correction_cands = [c for c in cands if c.source.startswith("correction")]
+        self.assertTrue(len(correction_cands) > 0,
+                        f"期望有纠错候选，实际候选: {[c.text + ':' + c.source for c in cands]}")
+        # 纠错候选应包含 '你好'（因为 o→i 后 nohao→nihao→你好）
+        self.assertTrue(any(c.text == "你好" for c in correction_cands),
+                        f"纠错候选应包含 你好，实际: {[c.text for c in correction_cands]}")
+
+    def test_correction_u_to_i(self) -> None:
+        """测试 u→i 误触纠错：输入 'nuh' 应能抽出 '你好' 纠错候选"""
+        gen = PinyinCandidateGenerator()
+        cands = gen.generate_candidates(context_before="", composing="nuh")
+        correction_cands = [c for c in cands if c.source.startswith("correction")]
+        self.assertTrue(len(correction_cands) > 0)
+        self.assertTrue(any(c.text == "你好" for c in correction_cands))
+
+    def test_correction_not_first_position(self) -> None:
+        """测试纠错候选不得挤占第 1 位精确匹配候选。
+        使用 'zu' (u→i 纠错): 正常候选 作(zuo), 纠错候选 自动排词(zi→zidongpaici)。"""
+        gen = PinyinCandidateGenerator()
+        cands = gen.generate_candidates(context_before="", composing="zu")
+        # 应有普通候选也有纠错候选
+        normal = [c for c in cands if not c.source.startswith("correction")]
+        correction = [c for c in cands if c.source.startswith("correction")]
+        self.assertTrue(len(normal) > 0, f"期望有普通候选，实际: {[c.text for c in cands]}")
+        self.assertTrue(len(correction) > 0, f"期望有纠错候选，实际: {[c.text for c in cands]}")
+        # 第 1 位不能是纠错候选
+        self.assertFalse(
+            cands[0].source.startswith("correction"),
+            f"第 1 位不应该是纠错候选，实际: {cands[0].text}:{cands[0].source}"
+        )
+
+    def test_correction_source_marked(self) -> None:
+        """测试纠错候选来源被标记为 'correction_' 前缀"""
+        gen = PinyinCandidateGenerator()
+        cands = gen.generate_candidates(context_before="", composing="nohao")
+        correction_cands = [c for c in cands if c.source.startswith("correction")]
+        self.assertTrue(len(correction_cands) > 0)
+        for c in correction_cands:
+            self.assertTrue(c.source.startswith("correction_"),
+                            f"纠错候选来源应以 'correction_' 开头，实际: {c.source}")
+
+    def test_correction_not_trigger_on_normal_input(self) -> None:
+        """测试正常不含 o/u 的输入不产生纠错候选"""
+        gen = PinyinCandidateGenerator()
+        cands = gen.generate_candidates(context_before="", composing="nih")
+        correction_cands = [c for c in cands if c.source.startswith("correction")]
+        self.assertEqual(len(correction_cands), 0,
+                         f"正常输入不应有纠错候选，实际有: {[c.text for c in correction_cands]}")
+
 
 if __name__ == "__main__":
     unittest.main()

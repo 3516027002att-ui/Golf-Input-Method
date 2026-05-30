@@ -68,10 +68,10 @@ class GuiEditor:
         )
         self.status_lbl.pack(side=tk.LEFT, padx=12)
 
-        # 控制选项：切换输入模式按钮
+        # 控制选项：切换输入模式按钮（仅中/英，日语通过内部 API 预留）
         self.mode_btn = tk.Button(
             self.toolbar,
-            text="切换模式 (中/英/日)",
+            text="切换中/英文",
             font=("Segoe UI", 9),
             fg=self.bg_dark,
             bg=self.cyan_accent,
@@ -161,13 +161,12 @@ class GuiEditor:
         is_letter = char.isalpha() and char.isascii()
 
         if is_letter:
-            # 统一转为小写传给引擎
+            # 拼音/日语模式：字母送入 IME 引擎；英文模式：直通不拦截
             char_to_handle = char.lower()
-            # 如果是拼音模式，或者英文模式下我们只要在拼写单词前缀就进行拦截
-            if self.engine.config.mode in ("pinyin", "english", "japanese"):
+            if self.engine.config.mode in ("pinyin", "japanese"):
                 if self.engine.handle_char(char_to_handle):
                     self.update_ime_ui()
-                    return "break" # 拦截，阻止直接写入 Text 框
+                    return "break"
 
         # 2. 处理退格键 (Backspace)
         if keysym == "BackSpace":
@@ -293,14 +292,9 @@ class GuiEditor:
     # --- 控制逻辑 ---
 
     def toggle_mode(self) -> None:
-        """输入模式循环切换 (pinyin -> english -> japanese -> pinyin)"""
+        """输入模式切换：仅中/英双路。日语通过 switch_language('ja') 内部接口预留。"""
         current_mode = self.engine.config.mode
-        if current_mode == "pinyin":
-            new_mode = "english"
-        elif current_mode == "english":
-            new_mode = "japanese"
-        else:
-            new_mode = "pinyin"
+        new_mode = "english" if current_mode == "pinyin" else "pinyin"
 
         self.engine.switch_mode(new_mode)
 

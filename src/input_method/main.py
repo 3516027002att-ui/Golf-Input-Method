@@ -55,12 +55,7 @@ def run_fallback_simulator(engine: InputMethodEngine) -> None:
             continue
         elif user_input == "/mode":
             current_mode = engine.config.mode
-            if current_mode == "pinyin":
-                new_mode = "english"
-            elif current_mode == "english":
-                new_mode = "japanese"
-            else:
-                new_mode = "pinyin"
+            new_mode = "english" if current_mode == "pinyin" else "pinyin"
             engine.switch_mode(new_mode)
             print(f"模式已切换为: {new_mode.upper()}")
             continue

@@ -120,13 +120,17 @@ class TestInputMethodV0Features(unittest.TestCase):
         self.assertEqual(self.engine.user_memory.get_user_weight("想要", "xiangyao"), 0.0)
 
     def test_japanese_mode(self) -> None:
-        """测试日语模式初始化与返回假名候选"""
-        self.engine.switch_mode("japanese")
+        """测试日语模式通过 switch_language('ja') 内部接口可访问"""
+        # switch_mode 不允许切换到日语 — UI 层面隐藏
+        with self.assertRaises(ValueError):
+            self.engine.switch_mode("japanese")
+        # switch_language 内部接口允许
+        self.engine.switch_language("ja")
         self.assertEqual(self.engine.config.mode, "japanese")
-        
+
         for char in "ka":
             self.engine.handle_char(char)
-            
+
         cands = [c.text for c in self.engine.candidates]
         self.assertTrue("か" in cands)
 

@@ -226,6 +226,57 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
         build(0, [], [])
         return candidates
 
+    # ── 键位误触纠错映射 ──
+    CORRECTION_MAP = {
+        "o": ["i"],   # o 键位于 i 键右侧，用户可能误触
+        "u": ["i"],   # u 键位于 i 键右侧，用户可能误触
+    }
+
+    def _correction_candidates(self, composing: str) -> List[Candidate]:
+        """对明显键位误触 (i/o/u) 生成纠错候选。
+        纠错候选来源标记为 'correction'，便于测试和 UI 标记。"""
+        composing = composing.lower().strip()
+        candidates: List[Candidate] = []
+
+        # 检查是否包含可纠错字符
+        needs_correction = any(ch in self.CORRECTION_MAP for ch in composing)
+        if not needs_correction or len(composing) < 2:
+            return candidates
+
+        # 生成所有纠错变体
+        corrected_keys = set()
+        for pos, ch in enumerate(composing):
+            if ch in self.CORRECTION_MAP:
+                for replacement in self.CORRECTION_MAP[ch]:
+                    corrected = composing[:pos] + replacement + composing[pos + 1:]
+                    corrected_keys.add(corrected)
+
+        # 对每个纠错后的拼音查找匹配词
+        for corrected_pinyin in corrected_keys:
+            for word, pinyin, short, freq, _source in self.words:
+                freq_f = float(freq)
+                # 纠错拼音精确匹配
+                if pinyin == corrected_pinyin:
+                    candidates.append(Candidate(
+                        word, composing, freq_f * 1.0,
+                        "correction_exact_pinyin",
+                    ))
+                # 纠错拼音前缀匹配
+                elif pinyin.startswith(corrected_pinyin):
+                    ratio = len(corrected_pinyin) / len(pinyin)
+                    candidates.append(Candidate(
+                        word, composing, freq_f * 0.7 * ratio,
+                        "correction_prefix_pinyin",
+                    ))
+                # 纠错简拼匹配
+                elif short == corrected_pinyin:
+                    candidates.append(Candidate(
+                        word, composing, freq_f * 0.9,
+                        "correction_exact_short",
+                    ))
+
+        return candidates
+
     def generate_candidates(self, context_before: str, composing: str) -> List[Candidate]:
         candidates: List[Candidate] = []
         composing = composing.lower().strip()
@@ -270,4 +321,33 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
                 )
 
         candidates.extend(self._segmented_candidates(composing))
-        return self._deduplicate_and_truncate(candidates, self.max_recall)
+
+        # ── 基础纠错：i/o/u 键位误触 ──
+        correction_candidates = self._correction_candidates(composing)
+
+        # 去重 + 排序（普通候选在前）
+        normal = self._deduplicate_and_truncate(candidates, self.max_recall)
+
+        if not correction_candidates:
+            return normal
+
+        correction = self._deduplicate_and_truncate(correction_candidates, 20)
+
+        # 规则：纠错候选不得挤占第 1 位精确匹配候选
+        # 默认放在第 4-8 位之间 (0-indexed: 3-7)
+        # 若无普通候选且有高置信纠错，放在第 2-4 位之间 (0-indexed: 1-3)
+        has_normal = len(normal) > 0
+        if has_normal:
+            insert_at = min(max(3, len(normal)), 7)
+        else:
+            insert_at = 1  # 无普通候选时从第 2 位开始
+
+        merged = normal[:insert_at]
+        for corr in correction:
+            if len(merged) >= self.max_recall:
+                break
+            if corr.text not in {c.text for c in merged}:
+                merged.append(corr)
+        merged.extend([c for c in normal[insert_at:] if c.text not in {m.text for m in merged}])
+
+        return merged[:self.max_recall]

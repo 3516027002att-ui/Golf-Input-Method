@@ -494,3 +494,44 @@ python scripts/benchmark_lexicon.py --dict-path .smoke_data/imported_lexicon.jso
 采用**方案 B**：无法合法提交真实大词库时，提供完整的词库生成、导入和压测工具。
 `data/lexicon/dict.jsonl` (~435 条) 是手工整理的无版权常用词示例，**不是工业级词库**。
 工具链可用于生成、导入和压测任意规模的词库。
+
+## 十五、2026-05-30 收尾：后台启动 + 中英双路 + 日语隐藏 + 误触纠错
+
+### 新增与修改
+
+**后台启动**：
+- `src/input_method/tray_app.py`：Windows 后台启动器，单实例保护（文件锁），隐藏控制台窗口
+- `scripts/launch_golf.bat`：桌面双击入口，无需命令行
+
+**中英文主流程**：
+- 中文模式：拼音 → 候选 → 上屏（不变）
+- 英文模式：**改为直通**（`handle_char` 返回 `False`，字母不经 IME 直接上屏）
+- GUI 模式切换按钮：从 3 路 (中/英/日) 改为 2 路 (中/英)
+- 终端 `/mode` 命令：同理改为 2 路
+
+**日语保留但暂不开放**：
+- `switch_mode()` 仅接受 `"pinyin"` 和 `"english"`，拒绝 `"japanese"`（抛 `ValueError`）
+- 新增 `switch_language("ja")` 内部接口，可用于编程访问日语模式
+- `JapaneseCandidateGenerator` 代码完整保留
+- 用户界面不暴露日语切换入口
+- CLI `--mode japanese` 仍可通过启动参数直接进入（开发者通道）
+
+**基础误触纠错 (i/o/u)**：
+- `PinyinCandidateGenerator.CORRECTION_MAP`：`{"o": ["i"], "u": ["i"]}`
+- 纠错机制：替换 composing 中的误触字符后尝试匹配，生成 `correction_*` 来源候选
+- 位置规则：有普通候选时插入第 4-8 位；无普通候选时插入第 2-4 位
+- 纠错候选来源标记为 `correction_exact_pinyin` / `correction_prefix_pinyin` / `correction_exact_short`
+
+### 验证记录
+
+- `python -m pytest tests/ -q`：**53 passed**
+- 新增 5 个纠错测试 + 2 个模式切换测试 + 1 个日语内部接口测试
+- import smoke：所有关键类 + `tray_app._SingleInstance` + `switch_language` 均可导入
+- `evaluate_candidates.py`：中文 100%，英文 0%（直通模式预期），日语 100%
+- `benchmark_latency.py`：P99 0.223ms（无性能退化）
+- `git diff --check`：无空白错误
+
+### 当前仍不是系统级输入法
+
+golf 是本地输入法框架 + GUI 编辑器 + 后台启动器，**未接入 Windows TSF/IMM32**。
+不能在记事本/浏览器等外部应用中使用。

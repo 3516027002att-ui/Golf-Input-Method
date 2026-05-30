@@ -142,25 +142,42 @@ class TestInputMethodEngine(unittest.TestCase):
         self.assertTrue(len(engine.candidates) > 0)
 
     def test_switch_mode(self) -> None:
-        """测试 switch_mode 切换输入模式"""
+        """测试 switch_mode 切换输入模式（仅中/英双路）"""
         self.engine.handle_char("n")
         self.engine.handle_char("i")
         self.assertEqual(self.engine.composing, "ni")
-        
+
         # 切换到英文模式
         self.engine.switch_mode("english")
         self.assertEqual(self.engine.config.mode, "english")
         self.assertEqual(self.engine.composing, "")  # composing 应被清空
-        
-        # 英文模式下输入
-        self.engine.handle_char("t")
-        self.engine.handle_char("h")
-        cands = self.engine.get_current_page_candidates()
-        self.assertTrue(len(cands) > 0)
-        
+
+        # 英文模式：直通不拦截 (handle_char 返回 False)
+        self.assertFalse(self.engine.handle_char("t"))
+        self.assertEqual(self.engine.composing, "")  # composing 仍为空
+
         # 切换回拼音模式
         self.engine.switch_mode("pinyin")
         self.assertEqual(self.engine.config.mode, "pinyin")
+
+    def test_switch_mode_rejects_japanese(self) -> None:
+        """测试 switch_mode 不允许切换到日语（UI 层面隐藏）"""
+        with self.assertRaises(ValueError):
+            self.engine.switch_mode("japanese")
+
+    def test_switch_language_ja(self) -> None:
+        """测试 switch_language('ja') 内部接口可切换到日语（预留）"""
+        self.engine.switch_language("ja")
+        self.assertEqual(self.engine.config.mode, "japanese")
+        # 确认日语 generator 可用
+        self.engine.handle_char("n")
+        self.engine.handle_char("i")
+        self.engine.handle_char("h")
+        self.engine.handle_char("o")
+        self.engine.handle_char("n")
+        cands = self.engine.get_current_page_candidates()
+        # 日语模式应该能召回候选
+        self.assertTrue(len(cands) > 0)
 
     def test_handle_enter_empty(self) -> None:
         """测试空缓冲区时按回车"""
@@ -186,23 +203,20 @@ class TestInputMethodEngine(unittest.TestCase):
         # 末尾应该仍然是 "字"
         self.assertTrue(self.engine.committed_history.endswith("字"))
 
-    def test_english_mode_engine(self) -> None:
-        """测试英文模式下引擎的基本操作"""
+    def test_english_mode_passthrough(self) -> None:
+        """测试英文模式：输入直通，不进入 IME 候选流程"""
         eng_config = InputMethodConfig(mode="english", page_size=5)
         eng_engine = InputMethodEngine(eng_config)
-        
-        eng_engine.handle_char("t")
-        eng_engine.handle_char("h")
-        self.assertEqual(eng_engine.composing, "th")
-        
-        cands = eng_engine.get_current_page_candidates()
-        self.assertTrue(len(cands) > 0)
-        self.assertTrue(any(c.text == "the" for c in cands))
-        
-        # 空格选首选词
-        eng_engine.handle_space()
-        self.assertTrue(len(eng_engine.committed_history) > 0)
+
+        # 英文模式下 handle_char 返回 False（不拦截）
+        self.assertFalse(eng_engine.handle_char("t"))
+        self.assertFalse(eng_engine.handle_char("h"))
+        # composing 为空，不会产生候选
         self.assertEqual(eng_engine.composing, "")
+
+        # 空格在无 composing 时提交空格字符
+        eng_engine.handle_space()
+        self.assertIn(" ", eng_engine.committed_history)
 
     def test_config_validate_invalid_mode(self) -> None:
         """测试非法 mode 值应抛出 ValueError"""

@@ -77,6 +77,9 @@ class InputMethodEngine:
     def handle_char(self, char: str) -> bool:
         if len(char) != 1 or char in ("\r", "\n", "\b", " "):
             return False
+        # 英文模式: 直通，不进入 IME 候选流程
+        if self.config.mode == "english":
+            return False
         if self.config.mode in ("pinyin", "japanese") and not (char.isascii() and char.isalpha()):
             return False
 
@@ -124,6 +127,24 @@ class InputMethodEngine:
         return False
 
     def switch_mode(self, new_mode: str) -> None:
+        """用户界面可用的模式切换：仅支持 pinyin / english。"""
+        if new_mode not in ("pinyin", "english"):
+            raise ValueError(
+                f"switch_mode 仅支持 'pinyin' 或 'english'，不允许 {new_mode!r}。"
+                f" 如需切换到日语，请使用 switch_language('ja')。"
+            )
+        self._do_switch(new_mode)
+
+    def switch_language(self, lang: str) -> None:
+        """内部编程接口：切换到任意已注册语言模式 (pinyin / english / ja / japanese)。
+        日语模式为预留接口，当前不是可用输入模式，仅供开发和后续接入使用。
+        """
+        normalized = "japanese" if lang in ("ja", "japanese") else lang
+        self.config.mode = normalized
+        self.config.validate()
+        self._do_switch(normalized)
+
+    def _do_switch(self, new_mode: str) -> None:
         self.config.mode = new_mode
         self.config.validate()
         self.generator = self._build_generator()

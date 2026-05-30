@@ -215,12 +215,7 @@ class CliSimulator:
                         self.engine.clear_user_memory()
                     elif cmd == "/mode":
                         current_mode = self.engine.config.mode
-                        if current_mode == "pinyin":
-                            new_mode = "english"
-                        elif current_mode == "english":
-                            new_mode = "japanese"
-                        else:
-                            new_mode = "pinyin"
+                        new_mode = "english" if current_mode == "pinyin" else "pinyin"
                         self.engine.switch_mode(new_mode)
                     self.draw_ui()
                 else:
