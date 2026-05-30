@@ -4,7 +4,6 @@
 """
 
 import ctypes
-import ctypes.wintypes
 import logging
 import os
 import queue
@@ -76,19 +75,19 @@ IDM_EXIT = 1003
 
 class _NOTIFYICONDATA(ctypes.Structure):
     _fields_ = [
-        ("cbSize", ctypes.wintypes.DWORD),
-        ("hWnd", ctypes.wintypes.HWND),
-        ("uID", ctypes.wintypes.UINT),
-        ("uFlags", ctypes.wintypes.UINT),
-        ("uCallbackMessage", ctypes.wintypes.UINT),
-        ("hIcon", ctypes.wintypes.HICON),
+        ("cbSize", ctypes.c_uint32),
+        ("hWnd", ctypes.c_void_p),
+        ("uID", ctypes.c_uint32),
+        ("uFlags", ctypes.c_uint32),
+        ("uCallbackMessage", ctypes.c_uint32),
+        ("hIcon", ctypes.c_void_p),
         ("szTip", ctypes.c_char * 128),
-        ("dwState", ctypes.wintypes.DWORD),
-        ("dwStateMask", ctypes.wintypes.DWORD),
+        ("dwState", ctypes.c_uint32),
+        ("dwStateMask", ctypes.c_uint32),
         ("szInfo", ctypes.c_char * 256),
-        ("uVersion", ctypes.wintypes.UINT),
+        ("uVersion", ctypes.c_uint32),
         ("szInfoTitle", ctypes.c_char * 64),
-        ("dwInfoFlags", ctypes.wintypes.DWORD),
+        ("dwInfoFlags", ctypes.c_uint32),
     ]
 
 
@@ -103,6 +102,24 @@ class SystemTrayIcon:
         self._thread: Optional[threading.Thread] = None
         self._hwnd = None
         self._tip = b"golf \xe8\xbe\x93\xe5\x85\xa5\xe6\xb3\x95"  # "golf 输入法"
+
+    @staticmethod
+    def _load_icon(user32) -> int:
+        """加载 golf 图标。优先 assets/golf.ico，失败则用默认图标。"""
+        import os as _os
+        icon_paths = [
+            _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "assets", "golf.ico"),
+            _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "assets", "golf.ico"),
+            "assets/golf.ico",
+        ]
+        for p in icon_paths:
+            if _os.path.exists(p):
+                h = user32.LoadImageW(0, p, 1, 16, 16, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+                if h:
+                    logger.info("加载图标: %s", p)
+                    return h
+        logger.warning("未找到 golf.ico，使用默认图标")
+        return user32.LoadIconW(0, 32512)  # fallback
 
     def set_tip(self, text: str) -> None:
         self._tip = text.encode("gbk", errors="replace")[:127]
@@ -122,15 +139,28 @@ class SystemTrayIcon:
         kernel32 = ctypes.windll.kernel32
 
         # 注册窗口类
-        wndclass = ctypes.wintypes.WNDCLASSW()
-        wndclass.lpfnWndProc = _tray_wnd_proc
+        class WNDCLASSW(ctypes.Structure):
+            _fields_ = [
+                ("style", ctypes.c_uint),
+                ("lpfnWndProc", ctypes.c_void_p),
+                ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int),
+                ("hInstance", ctypes.c_void_p),
+                ("hIcon", ctypes.c_void_p),
+                ("hCursor", ctypes.c_void_p),
+                ("hbrBackground", ctypes.c_void_p),
+                ("lpszMenuName", ctypes.c_wchar_p),
+                ("lpszClassName", ctypes.c_wchar_p),
+            ]
+        wndclass = WNDCLASSW()
+        wndclass.lpfnWndProc = ctypes.cast(_tray_wnd_proc, ctypes.c_void_p)
         wndclass.hInstance = kernel32.GetModuleHandleW(None)
         wndclass.lpszClassName = "GolfIMETrayWindow"
         atom = user32.RegisterClassW(ctypes.byref(wndclass))
 
-        # 创建隐藏消息窗口
+        # 创建隐藏消息窗口（用 MAKEINTATOM 或类名字符串）
         hwnd = user32.CreateWindowExW(
-            0, ctypes.c_char_p(atom), b"GolfTray", 0,
+            0, "GolfIMETrayWindow", "GolfTray", 0,
             0, 0, 0, 0, 0, 0, 0, 0
         )
         self._hwnd = hwnd
@@ -138,6 +168,8 @@ class SystemTrayIcon:
         # 存储 self 引用到全局变量，供窗口过程回调使用
         _tray_instances[id(self)] = self
 
+        # 加载 golf 专属图标
+        icon_handle = self._load_icon(user32)
         # 添加托盘图标
         nid = _NOTIFYICONDATA()
         nid.cbSize = ctypes.sizeof(_NOTIFYICONDATA)
@@ -145,7 +177,7 @@ class SystemTrayIcon:
         nid.uID = 1
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_TRAY
-        nid.hIcon = user32.LoadIconW(0, 32512)  # IDI_APPLICATION
+        nid.hIcon = icon_handle
         nid.szTip = self._tip
         shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
         _tray_instances[id(self)] = self
@@ -153,7 +185,13 @@ class SystemTrayIcon:
         logger.info("系统托盘图标已创建")
 
         # 消息循环
-        msg = ctypes.wintypes.MSG()
+        class MSG(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", ctypes.c_void_p), ("message", ctypes.c_uint),
+                ("wParam", ctypes.c_void_p), ("lParam", ctypes.c_void_p),
+                ("time", ctypes.c_uint32), ("pt", ctypes.c_long * 2),
+            ]
+        msg = MSG()
         while self._running:
             result = user32.GetMessageW(ctypes.byref(msg), 0, 0, 0)
             if result <= 0:
@@ -209,7 +247,9 @@ class SystemTrayIcon:
         user32.AppendMenuW(menu, 0x800, 0, "")  # 分隔线
         user32.AppendMenuW(menu, 0, IDM_EXIT, "退出 golf")
         # 获取光标位置
-        pt = ctypes.wintypes.POINT()
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        pt = POINT()
         user32.GetCursorPos(ctypes.byref(pt))
         user32.SetForegroundWindow(self._hwnd)
         user32.TrackPopupMenu(menu, 0, pt.x, pt.y, 0, self._hwnd, None)
@@ -228,10 +268,14 @@ class SystemTrayIcon:
 _tray_instances: dict = {}
 
 
-@ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.wintypes.HWND, ctypes.wintypes.UINT, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
+# 确保 DefWindowProcW 使用正确的 64 位参数类型
+ctypes.windll.user32.DefWindowProcW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+ctypes.windll.user32.DefWindowProcW.restype = ctypes.c_longlong
+
+
+@ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
 def _tray_wnd_proc(hwnd, msg, wparam, lparam):
     if msg in (WM_TRAY, WM_COMMAND):
-        # 遍历查找处理者（简单策略：取最后一个注册的实例）
         for obj in list(_tray_instances.values()):
             try:
                 obj._handle_message(msg, lparam)
@@ -353,8 +397,10 @@ class GolfImeApp:
 # ── 命令行入口 ──
 
 def _hide_console() -> None:
+    """隐藏控制台窗口但设置标题便于识别。"""
     if os.name == "nt":
         try:
+            ctypes.windll.kernel32.SetConsoleTitleW("golf 输入法 — 系统 IME")
             hwnd = ctypes.windll.kernel32.GetConsoleWindow()
             if hwnd != 0:
                 ctypes.windll.user32.ShowWindow(hwnd, 0)
