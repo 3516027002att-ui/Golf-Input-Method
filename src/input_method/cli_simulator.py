@@ -138,7 +138,7 @@ class CliSimulator:
         print(status_line)
         print(f" [模型状态: {TermColors.DIM}{model_info}{TermColors.ENDC}]")
         print(border)
-        print(f"{TermColors.DIM}（支持中英文切换，键入 '/mode' 切换模式，键入 '/clear' 清屏，键入 '/exit' 退出）{TermColors.ENDC}")
+        print(f"{TermColors.DIM}（支持中英文切换，键入 '/mode' 切换模式，键入 '/clear' 清屏，键入 '/clear_memory' 清空用户记忆，键入 '/exit' 退出）{TermColors.ENDC}")
 
     def run(self) -> None:
         """启动键盘捕获事件主循环"""
@@ -211,6 +211,8 @@ class CliSimulator:
                         break
                     elif cmd == "/clear":
                         self.engine.clear()
+                    elif cmd == "/clear_memory":
+                        self.engine.clear_user_memory()
                     elif cmd == "/mode":
                         current_mode = self.engine.config.mode
                         if current_mode == "pinyin":

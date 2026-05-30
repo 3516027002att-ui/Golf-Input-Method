@@ -14,7 +14,9 @@
   - tokenizer 规格。
 - `data/lexicon/`
   - `dict.jsonl`
-  - 小型示例外部高频字词库（JSONL 格式），可用作召回与传统排序测试基线。
+  - 外部高频中文词库（JSONL 格式）。目前通过 `scripts/import_lexicon.py` 自动扩充，包含了约 500 个常用无版权争议的汉字和词组，用于输入法底座的召回和排序。
+  - 格式为：每行一条 JSON 格式记录，必须包含 `word`、`pinyin`、`short_pinyin`、`freq`、`source` 字段，例如：
+    `{"word": "你好", "pinyin": "nihao", "short_pinyin": "nh", "freq": 6700, "source": "lexicon"}`
 - `data/cached_challenge_fineweb.py`
   - 现有数据缓存下载脚本，保留用于重建公开语料缓存。
 - `data/download_hf_docs_and_tokenize.py`

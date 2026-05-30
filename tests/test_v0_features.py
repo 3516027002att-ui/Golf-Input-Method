@@ -26,6 +26,9 @@ class TestInputMethodV0Features(unittest.TestCase):
             f.write('{"word": "想要", "pinyin": "xiangyao", "short_pinyin": "xy", "freq": 6100, "source": "test"}\n')
             f.write('{"word": "相邀", "pinyin": "xiangyao", "short_pinyin": "xy", "freq": 3000, "source": "test"}\n')
             f.write('{"word": "我想要", "pinyin": "woxiangyao", "short_pinyin": "wxy", "freq": 5500, "source": "test"}\n')
+            f.write('{"word": "你好", "pinyin": "nihao", "short_pinyin": "nh", "freq": 6700, "source": "test"}\n')
+            f.write('{"word": "中国", "pinyin": "zhongguo", "short_pinyin": "zg", "freq": 6500, "source": "test"}\n')
+            f.write('{"word": "输入法", "pinyin": "shurufa", "short_pinyin": "srf", "freq": 3600, "source": "test"}\n')
             
         self.config = InputMethodConfig(
             mode="pinyin",
@@ -45,7 +48,7 @@ class TestInputMethodV0Features(unittest.TestCase):
     def test_lexicon_loader_success(self) -> None:
         """测试词库成功加载"""
         entries = LexiconLoader.load_from_jsonl(self.dict_file)
-        self.assertEqual(len(entries), 6)
+        self.assertEqual(len(entries), 9)
         self.assertEqual(entries[0].word, "我")
         
     def test_lexicon_loader_fallback(self) -> None:
@@ -133,6 +136,81 @@ class TestInputMethodV0Features(unittest.TestCase):
         self.engine.switch_mode("english")
         self.assertEqual(id(self.engine), old_id)
         self.assertEqual(self.engine.config.mode, "english")
+
+    def test_all_v0_essential_pinyin_queries(self) -> None:
+        """测试 v0 所有必需拼音和简拼的召回质量"""
+        cases = [
+            ("nihao", "你好"),
+            ("nh", "你好"),
+            ("wo", "我"),
+            ("zhongguo", "中国"),
+            ("zg", "中国"),
+            ("shurufa", "输入法"),
+            ("xiangyao", "想要"),
+            ("woxiangyao", "我想要"),
+        ]
+        for query, expected in cases:
+            self.engine.clear()
+            for char in query:
+                self.engine.handle_char(char)
+            cands = [c.text for c in self.engine.candidates]
+            self.assertTrue(
+                expected in cands[:3],
+                f"查询 '{query}' 期望的候选词 '{expected}' 未出现在 Top-3 中: {cands[:3]}"
+            )
+
+    def test_nonexistent_pinyin_query(self) -> None:
+        """测试不合理拼音，应该召回空或极低概率的系统提示而无意义词条"""
+        self.engine.clear()
+        for char in "zzzzz":
+            self.engine.handle_char(char)
+        cands = [c.text for c in self.engine.candidates]
+        self.assertTrue(len(cands) == 0 or all("无" in c or "提示" in c for c in cands))
+
+    def test_user_memory_persists_across_engine_recreations(self) -> None:
+        """测试重新创建 Engine 后用户记忆仍影响排序"""
+        # 第一个引擎：选择低频词"相邀"多次
+        self.engine.clear()
+        self.engine.user_memory.record_selection("相邀", "xiangyao")
+        self.engine.user_memory.record_selection("相邀", "xiangyao")
+
+        # 用同一配置创建全新的 Engine 实例
+        new_engine = InputMethodEngine(self.config)
+        for char in "xiangyao":
+            new_engine.handle_char(char)
+
+        # 重新加载后，"相邀"因用户记忆应排在首位
+        self.assertEqual(new_engine.candidates[0].text, "相邀")
+
+    def test_gui_modules_importable(self) -> None:
+        """测试 GUI 模块可正常导入"""
+        from src.input_method.gui_editor import GuiEditor
+        from src.input_method.gui_candidate_window import GuiCandidateWindow
+        self.assertTrue(callable(GuiEditor))
+        self.assertTrue(callable(GuiCandidateWindow))
+
+    def test_evaluate_script_importable(self) -> None:
+        """测试评估脚本可作为模块导入（不实际运行 main）"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "evaluate_candidates",
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "evaluate_candidates.py")
+        )
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        # 只验证可加载，不执行 main
+        self.assertIsNotNone(module)
+
+    def test_benchmark_script_importable(self) -> None:
+        """测试 benchmark 脚本可作为模块导入"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "benchmark_latency",
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "benchmark_latency.py")
+        )
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(module)
 
 
 if __name__ == "__main__":

@@ -186,7 +186,7 @@ class GuiEditor:
             if self.engine.composing or (not self.engine.composing and current_cands and self.engine.candidates[0].source == "association"):
                 first_cand = current_cands[0].text if current_cands else ""
                 if first_cand:
-                    self.commit_to_editor(first_cand)
+                    self.commit_to_editor(first_cand, input_key=self.engine.composing)
                 return "break"
 
         # 4. 处理回车键 (Return / Enter)
@@ -206,7 +206,7 @@ class GuiEditor:
                 idx = num - 1
                 if idx < len(current_cands):
                     selected_cand = current_cands[idx].text
-                    self.commit_to_editor(selected_cand)
+                    self.commit_to_editor(selected_cand, input_key=self.engine.composing)
                 return "break"
 
         # 6. 处理翻页键 - / = 或是 PageUp / PageDown
@@ -219,6 +219,13 @@ class GuiEditor:
                 elif keysym == "equal" or keysym == "Next": # "=" 键或 PageDown
                     if self.engine.handle_page_next():
                         self.update_ime_ui()
+                return "break"
+
+        # 7. 处理 Escape 键 (清空 composing 并隐藏候选窗)
+        if keysym == "Escape":
+            if self.engine.composing:
+                self.engine.clear()
+                self.cand_win.hide()
                 return "break"
 
         return None
@@ -258,19 +265,29 @@ class GuiEditor:
         else:
             self.cand_win.hide()
 
-    def commit_to_editor(self, text: str) -> None:
-        """将选定文本插入到 Text 控件的光标处，清空输入引擎并触发联想"""
-        # 1. 在当前光标处插入文字
+    def commit_to_editor(self, text: str, input_key: str = "") -> None:
+        """将选定文本插入到 Text 控件的光标处，记录用户记忆，清空引擎并触发联想。
+
+        Args:
+            text: 要上屏的文本。
+            input_key: 当前 composing 拼音键，非空时触发用户记忆记录。
+                       回车上屏原文时应传空串以跳过记忆。
+        """
+        # 1. 如果有有效输入键，记录用户选词到记忆（持久化到磁盘）
+        if input_key and text:
+            self.engine.user_memory.record_selection(text, input_key)
+
+        # 2. 在当前光标处插入文字
         self.text_area.insert(tk.INSERT, text)
 
-        # 2. 更新引擎端的状态，同步已上屏文本（引擎用于联想词生成）
-        # 我们可以获取最后 50 个字符提供给引擎做上下文联想
+        # 3. 通过引擎公开接口提交文本，清空 composing 并刷新候选
+        self.engine.commit_text(text)
+
+        # 4. 同步编辑器上下文到引擎（用于联想词生成）
         context = self.text_area.get("insert -50 chars", "insert")
         self.engine.committed_history = context
-        self.engine.composing = ""
-        self.engine._update_candidates() # 引擎重新召回联想词
 
-        # 3. 刷新 GUI 输入法窗口（显示联想词）
+        # 5. 刷新 GUI 输入法窗口（显示联想词）
         self.update_ime_ui()
 
     # --- 控制逻辑 ---

@@ -22,6 +22,73 @@
 
 `train_gpt.py` 目前只作为可复用训练基线和重构参考。后续应将它拆分或替换为面向排词任务的训练代码，而不是继续沿用比赛指标和提交约束。
 
+## 快速启动与命令手册
+
+### 启动命令
+- **GUI 编辑器（记事本 Demo）**：
+  ```bash
+  python -m src.input_method.app
+  ```
+- **终端模拟器**：
+  ```bash
+  python -m src.input_method.main
+  ```
+
+### 评估与测试命令
+- **候选质量评估**：
+  ```bash
+  python scripts/evaluate_candidates.py
+  ```
+- **响应延迟 Benchmark**：
+  ```bash
+  python scripts/benchmark_latency.py
+  ```
+- **词库扩充/导入脚本**：
+  ```bash
+  python scripts/import_lexicon.py
+  ```
+
+### 交互操作与快捷键
+- **composing 缓冲区输入**：在中文/日语/英文模式下，直接输入字母即可触发匹配。
+- **选择候选词**：按空格选择第一候选，或输入数字键 `1-5` 选择对应编号候选词上屏。
+- **修改缓冲区**：按 `Backspace`（退格键）删除缓冲区末尾的拼音字母。
+- **上屏原始文本**：按 `Enter`（回车键）直接将缓冲区中的原始英文字母上屏。
+- **候选词翻页**：按 `-` 键 (PageUp) 或 `=` 键 (PageDown) 进行候选词列表翻页。
+- **清空用户学习记忆**：
+  - GUI 界面：直接点击顶部工具栏的 **“清空用户记忆”** 按钮。
+  - 终端模式：在缓冲区为空时键入 `/clear_memory` 命令回车即可。
+  - fallback 行交互终端：直接在提示符下输入 `/clear_memory` 即可。
+
+### 词库格式说明
+外部词库文件位于 `data/lexicon/dict.jsonl`，采用每行一条 JSON 格式记录，例如：
+```json
+{"word": "中国", "pinyin": "zhongguo", "short_pinyin": "zg", "freq": 6500, "source": "lexicon"}
+```
+可通过 `python scripts/import_lexicon.py` 进行重构、合并与自定义扩充。
+
+### 用户记忆文件位置
+默认持久化在用户主目录下：`~/.golf_user_memory.json`，不会被 Git 仓库跟踪，有效保护用户隐私。
+
+### 当前 v0 可试用输入示例
+在中文拼音模式下，请尝试输入以下拼音：
+- `nihao` -> `你好`
+- `nh` -> `你好`
+- `wo` -> `我`
+- `women` -> `我们`
+- `jintian` -> `今天`
+- `zhongguo` -> `中国`
+- `zg` -> `中国`
+- `shurufa` -> `输入法`
+- `xiangyao` -> `想要`
+- `woxiangyao` -> `我想要`
+
+### 当前限制 (重要说明)
+1. **非系统级输入法**：目前仅为内置记事本/终端的 Demo，未挂接 Windows/macOS 系统级输入法框架。
+2. **未接入真实 LLM**：机器学习排序 `ModelReranker` 依然为桩类 (STUB)，当前默认使用基于词频与用户记忆的传统 baseline 排序。
+3. **日语模式仅是骨架**：仅内置少数常用罗马字到假名和常用日语词的映射，只用于通路验证，不具备日常日语打字输入能力。
+4. **外部词库仍非工业级**：默认词典为扩充后的 400+ 个高频核心常用词，若需要更大规模输入，须通过 `import_lexicon.py` 导入本地词库。
+5. **评估与性能 Benchmark 仅为小样本 smoke 测试**：运行脚本耗时均是小规模验证，仅为开发冒烟测试，不能作为真实全场景打字质量数据。
+
 ## 当前状态与已实现底座 v0
 
 目前，项目已完成了 **输入法底座 v0** 的构建，实现了一个在没有大语言模型时也能勉强可用的基础输入法框架：

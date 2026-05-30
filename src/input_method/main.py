@@ -17,6 +17,7 @@ def run_fallback_simulator(engine: InputMethodEngine) -> None:
     print(" - 直接按回车 (空输入)：提交缓冲区原始文本")
     print(" - 输入 '/exit'：退出")
     print(" - 输入 '/mode'：切换中/英文模式")
+    print(" - 输入 '/clear_memory'：清空用户记忆")
     print("=" * 60)
 
     while True:
@@ -48,6 +49,10 @@ def run_fallback_simulator(engine: InputMethodEngine) -> None:
         if user_input == "/exit":
             print("已退出模拟器。")
             break
+        elif user_input == "/clear_memory":
+            engine.clear_user_memory()
+            print("用户学习记忆已清空。")
+            continue
         elif user_input == "/mode":
             current_mode = engine.config.mode
             if current_mode == "pinyin":
