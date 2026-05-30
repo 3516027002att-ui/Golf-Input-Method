@@ -270,16 +270,22 @@ class GlobalKeyboardHook:
 
     def _hook_thread(self) -> None:
         """钩子线程入口：安装钩子 + 消息循环。"""
-        hinstance = self._kernel32.GetModuleHandleW(None)
+        # WH_KEYBOARD_LL + 本进程: hMod 必须为 0 (NULL)
+        # https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwindowshookexw
         self._hook_id = self._user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._hook_proc, hinstance, 0
+            WH_KEYBOARD_LL, self._hook_proc, 0, 0
         )
         if not self._hook_id:
-            logger.error("SetWindowsHookExW 失败")
+            err = self._kernel32.GetLastError()
+            logger.error(
+                "SetWindowsHookExW 失败, GetLastError=%d. "
+                "可能需要管理员权限或当前环境不支持全局钩子。",
+                err,
+            )
             self._running = False
             return
 
-        logger.info("全局键盘钩子已安装 (hook_id=%s)", self._hook_id)
+        logger.info("全局键盘钩子已安装 (hook_id=%d)", self._hook_id)
 
         # Windows 消息循环（钩子需要）
         msg = ctypes.create_string_buffer(28)
