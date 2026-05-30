@@ -239,8 +239,8 @@ class GlobalKeyboardHook:
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
 
-        # 防止回调被 GC 回收
-        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
+        # 防止回调被 GC 回收；64位下 LRESULT/WPARAM/LPARAM 均为指针大小
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
         self._hook_proc = HOOKPROC(self._low_level_keyboard_proc)
 
     def _low_level_keyboard_proc(self, nCode: int, wParam: int, lParam: int) -> int:

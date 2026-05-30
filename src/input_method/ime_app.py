@@ -222,15 +222,15 @@ class SystemTrayIcon:
         nid.szTip = self._tip
         shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
 
-    def _handle_message(self, msg: int, lParam: int) -> None:
+    def _handle_message(self, msg: int, wParam: int, lParam: int) -> None:
         if msg == WM_TRAY:
-            if lParam == 0x0205:  # WM_RBUTTONUP — 右击弹出菜单
+            if lParam == 0x0205:  # WM_RBUTTONUP
                 self._show_menu()
-            elif lParam == 0x0203:  # WM_LBUTTONDBLCLK — 双击切换
+            elif lParam == 0x0203:  # WM_LBUTTONDBLCLK
                 if self._on_switch:
                     self._on_switch()
         elif msg == WM_COMMAND:
-            cmd = lParam & 0xFFFF
+            cmd = wParam & 0xFFFF  # LOWORD(wParam) = 菜单项 ID
             if cmd == IDM_TOGGLE and self._on_toggle:
                 self._on_toggle()
             elif cmd == IDM_SWITCH and self._on_switch:
@@ -278,7 +278,7 @@ def _tray_wnd_proc(hwnd, msg, wparam, lparam):
     if msg in (WM_TRAY, WM_COMMAND):
         for obj in list(_tray_instances.values()):
             try:
-                obj._handle_message(msg, lparam)
+                obj._handle_message(msg, wparam, lparam)
             except Exception:
                 pass
             break
@@ -303,11 +303,11 @@ class GolfImeApp:
         self._enabled = True
         self._running = False
 
-        # 托盘
+        # 托盘回调均通过 Tk after 调度到主线程执行
         self._tray = SystemTrayIcon(
-            on_toggle=self.toggle_enabled,
-            on_switch=self.switch_mode,
-            on_exit=self.stop,
+            on_toggle=lambda: self._root.after(0, self.toggle_enabled),
+            on_switch=lambda: self._root.after(0, self.switch_mode),
+            on_exit=lambda: self._root.after(0, self.stop),
         )
 
     def _ensure_cand_win(self) -> GuiCandidateWindow:
