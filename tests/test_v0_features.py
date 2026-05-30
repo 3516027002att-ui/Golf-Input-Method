@@ -47,8 +47,9 @@ class TestInputMethodV0Features(unittest.TestCase):
 
     def test_lexicon_loader_success(self) -> None:
         """测试词库成功加载"""
-        entries = LexiconLoader.load_from_jsonl(self.dict_file)
+        entries, bad_count = LexiconLoader.load_from_jsonl(self.dict_file)
         self.assertEqual(len(entries), 9)
+        self.assertEqual(bad_count, 0)
         self.assertEqual(entries[0].word, "我")
         
     def test_lexicon_loader_fallback(self) -> None:

@@ -101,7 +101,19 @@ class UserMemory:
             return 0.0
         input_key = input_key.lower().strip()
         if input_key in self.data and word in self.data[input_key]:
-            return float(self.data[input_key][word].get("weight", 0.0))
+            entry = self.data[input_key][word]
+            if not entry.get("enabled", True):
+                return 0.0
+            return float(entry.get("weight", 0.0))
+        return 0.0
+
+    def get_last_used_at(self, word: str, input_key: str) -> float:
+        """获取用户记忆中某词的最后使用时间戳，默认 0.0"""
+        if not input_key:
+            return 0.0
+        input_key = input_key.lower().strip()
+        if input_key in self.data and word in self.data[input_key]:
+            return float(self.data[input_key][word].get("last_used_at", 0.0))
         return 0.0
 
     def clear(self) -> None:
@@ -115,3 +127,72 @@ class UserMemory:
                 logger.warning("删除用户记忆文件失败 (file=%s)", self.file_path, exc_info=True)
         else:
             logger.info("用户记忆文件不存在，无需删除")
+
+    def delete_word(self, word: str, input_key: str) -> bool:
+        """删除单个用户词条。返回是否成功删除。"""
+        input_key = input_key.lower().strip()
+        if input_key in self.data and word in self.data[input_key]:
+            del self.data[input_key][word]
+            if not self.data[input_key]:
+                del self.data[input_key]
+            self.save()
+            return True
+        return False
+
+    def disable_word(self, word: str, input_key: str) -> bool:
+        """禁用单个用户词条（设 enabled=False）。返回是否成功。"""
+        input_key = input_key.lower().strip()
+        if input_key in self.data and word in self.data[input_key]:
+            self.data[input_key][word]["enabled"] = False
+            self.save()
+            return True
+        return False
+
+    def export_to_file(self, path: str) -> int:
+        """导出用户词库到 JSON 文件，返回导出条数"""
+        count = 0
+        for key_data in self.data.values():
+            count += len(key_data)
+        try:
+            parent_dir = os.path.dirname(path)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            logger.warning("导出用户词库失败 (path=%s)", path, exc_info=True)
+            return 0
+        return count
+
+    def import_from_file(self, path: str) -> int:
+        """从 JSON 文件导入用户词库（合并），返回新增条数"""
+        if not os.path.exists(path):
+            logger.warning("导入文件不存在: %s", path)
+            return 0
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                imported = json.load(f)
+        except Exception:
+            logger.warning("导入用户词库解析失败 (path=%s)", path, exc_info=True)
+            return 0
+
+        added = 0
+        for input_key, words_dict in imported.items():
+            if input_key not in self.data:
+                self.data[input_key] = {}
+            for word, info in words_dict.items():
+                if word not in self.data[input_key]:
+                    self.data[input_key][word] = info
+                    added += 1
+                else:
+                    # 合并：取较大权重
+                    existing = self.data[input_key][word]
+                    if info.get("weight", 0) > existing.get("weight", 0):
+                        existing["weight"] = info["weight"]
+                    existing["count"] = existing.get("count", 0) + info.get("count", 0)
+        self.save()
+        return added
+
+    def get_all_words(self) -> dict:
+        """返回所有用户词数据的副本"""
+        return dict(self.data)

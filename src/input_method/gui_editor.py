@@ -32,6 +32,8 @@ class GuiEditor:
 
         # 3. 实例化悬浮候选窗口
         self.cand_win = GuiCandidateWindow(self.root)
+        # 注册鼠标点击候选回调
+        self.cand_win.on_click_callback = self._on_candidate_click
 
         # 4. 构建主界面布局
         self._build_ui()
@@ -58,9 +60,10 @@ class GuiEditor:
         title_lbl.pack(side=tk.LEFT)
 
         # 状态指示器
+        mode_text = self._get_mode_display_text()
         self.status_lbl = tk.Label(
             self.toolbar,
-            text=f"当前模式: {self.engine.config.mode.upper()}",
+            text=mode_text,
             font=("Segoe UI", 9),
             fg=self.text_color,
             bg=self.bg_dark,
@@ -83,6 +86,22 @@ class GuiEditor:
             command=self.toggle_mode
         )
         self.mode_btn.pack(side=tk.RIGHT, padx=6)
+
+        # 设置按钮
+        self.settings_btn = tk.Button(
+            self.toolbar,
+            text="设置",
+            font=("Segoe UI", 9),
+            fg=self.text_color,
+            bg=self.bg_editor,
+            activebackground=self.border_color,
+            activeforeground=self.text_color,
+            bd=0,
+            padx=10,
+            pady=4,
+            command=self.show_settings
+        )
+        self.settings_btn.pack(side=tk.RIGHT, padx=6)
 
         # 控制选项：切换 AI 重排开关
         use_ml_str = "AI重排: 开启" if self.engine.config.use_model_rerank else "AI重排: 关闭"
@@ -144,6 +163,15 @@ class GuiEditor:
 
         # 默认为编辑器获取焦点
         self.text_area.focus_set()
+
+    # --- 辅助方法 ---
+
+    def _get_mode_display_text(self) -> str:
+        """获取模式显示文本，日语模式标注原型"""
+        mode = self.engine.config.mode.upper()
+        if self.engine.config.mode == "japanese":
+            return f"当前模式: {mode} (原型)"
+        return f"当前模式: {mode}"
 
     # --- 输入法按键拦截处理 ---
 
@@ -224,7 +252,7 @@ class GuiEditor:
         # 7. 处理 Escape 键 (清空 composing 并隐藏候选窗)
         if keysym == "Escape":
             if self.engine.composing:
-                self.engine.clear()
+                self.engine.handle_escape()
                 self.cand_win.hide()
                 return "break"
 
@@ -273,8 +301,8 @@ class GuiEditor:
             input_key: 当前 composing 拼音键，非空时触发用户记忆记录。
                        回车上屏原文时应传空串以跳过记忆。
         """
-        # 1. 如果有有效输入键，记录用户选词到记忆（持久化到磁盘）
-        if input_key and text:
+        # 1. 如果有有效输入键且学习功能开启，记录用户选词到记忆（持久化到磁盘）
+        if input_key and text and self.engine.config.learning_enabled:
             self.engine.user_memory.record_selection(text, input_key)
 
         # 2. 在当前光标处插入文字
@@ -284,11 +312,19 @@ class GuiEditor:
         self.engine.commit_text(text)
 
         # 4. 同步编辑器上下文到引擎（用于联想词生成）
+        # 注意：此处直接设置引擎内部状态以保持编辑器文本与引擎上下文同步
         context = self.text_area.get("insert -50 chars", "insert")
         self.engine.committed_history = context
 
         # 5. 刷新 GUI 输入法窗口（显示联想词）
         self.update_ime_ui()
+
+    def _on_candidate_click(self, index_on_page: int) -> None:
+        """候选窗口鼠标点击回调"""
+        current_cands = self.engine.get_current_page_candidates()
+        if 0 <= index_on_page < len(current_cands):
+            selected = current_cands[index_on_page].text
+            self.commit_to_editor(selected, input_key=self.engine.composing)
 
     # --- 控制逻辑 ---
 
@@ -304,7 +340,7 @@ class GuiEditor:
 
         self.engine.switch_mode(new_mode)
 
-        self.status_lbl.config(text=f"当前模式: {new_mode.upper()}")
+        self.status_lbl.config(text=self._get_mode_display_text())
         self.text_area.focus_set()
         self.update_ime_ui()
 
@@ -322,6 +358,42 @@ class GuiEditor:
         self.engine.clear_user_memory()
         self.text_area.focus_set()
         self.update_ime_ui()
+
+    def show_settings(self) -> None:
+        """弹出只读设置面板，展示当前配置"""
+        win = tk.Toplevel(self.root)
+        win.title("golf 输入法设置（只读）")
+        win.geometry("400x450")
+        win.configure(bg=self.bg_dark)
+        win.attributes("-topmost", True)
+
+        config = self.engine.config
+        items = [
+            ("模式", config.mode),
+            ("每页候选数", str(config.page_size)),
+            ("最大召回数", str(config.max_recall)),
+            ("词库路径", str(config.dict_path)),
+            ("用户记忆路径", self.engine.user_memory.file_path),
+            ("学习功能", "开启" if config.learning_enabled else "关闭"),
+            ("AI 重排", "开启 (STUB)" if config.use_model_rerank else "关闭"),
+            ("候选布局", config.candidate_layout),
+            ("日志级别", config.log_level),
+            ("主题", config.theme),
+            ("字体", f"{config.font_family} {config.font_size}"),
+            ("模糊音", str(config.fuzzy_pinyin)),
+        ]
+
+        for label, value in items:
+            row = tk.Frame(win, bg=self.bg_dark)
+            row.pack(fill=tk.X, padx=16, pady=4)
+            tk.Label(row, text=f"{label}:", font=("Segoe UI", 10, "bold"),
+                     fg=self.cyan_accent, bg=self.bg_dark, width=14, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=value, font=("Segoe UI", 10),
+                     fg=self.text_color, bg=self.bg_dark, anchor="w", wraplength=250).pack(side=tk.LEFT, fill=tk.X)
+
+        tk.Button(win, text="关闭", command=win.destroy,
+                  font=("Segoe UI", 10), fg=self.bg_dark, bg=self.cyan_accent,
+                  bd=0, padx=20, pady=6).pack(pady=16)
 
     def on_close(self) -> None:
         """主窗口关闭时安全销毁子窗口"""

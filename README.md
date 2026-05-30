@@ -1,174 +1,212 @@
-# golf
+# golf — AI 输入法项目
 
-本仓库已经从 Parameter Golf 比赛项目转型为 golf。golf 的目标是利用现有公开语料和 tokenizer 资产，训练一个用于输入法候选词、候选短语和句子补全的自动排词模型，并逐步补齐本地输入法客户端、候选生成、排序推理、评估和模型导出流程。
+> **当前阶段定位：** 不依赖大语言模型 (LLM) 也能使用的传统输入法底座，为后续 AI 排词提供完整基础设施。
 
-当前阶段是项目转型后的整理期：历史比赛脚本、日志、checkpoint 和实验记录会被清理；可复用的数据资产、依赖说明、许可证和主训练基线会保留。仓库不会声称已经实现完整输入法客户端或正式排词模型入口，后续实现必须以真实代码、真实命令和真实验证结果为准。
+## 项目概述
 
-## 项目入口
+golf 目标是构建一个 **大语言模型参与选词/排词的 AI 输入法**。当前版本实现了不依赖 LLM 的完整输入法底座，包括：
 
-- GitHub 仓库：<https://github.com/3516027002att-ui/Golf-Input-Method>
-- 当前展示名：`golf`
-- 本地历史目录名可能仍是 `parameter-golf`，但后续协作和文档引用应以 GitHub 仓库 `Golf-Input-Method` 和项目名 `golf` 为准。
+- ✅ 拼音/英文/日语（原型）三模式输入
+- ✅ 完整的输入缓冲区管理与候选栏交互
+- ✅ 基于词频的 baseline 排序（可解释打分）
+- ✅ 用户选词学习与权重记忆（持久化到本地 JSON）
+- ✅ 外部词库导入/合成词库生成/词库压测工具链
+- ✅ GUI 图形客户端 + 终端模拟器
+- ✅ 候选质量评估 + 性能延迟 Benchmark
+- ✅ Windows 系统级输入法接入工程路线文档
 
-## 当前状态
+### ⚠️ 明确声明
 
-- 已保留公开语料缓存：`data/datasets/fineweb10B_sp1024/`
-- 已保留 tokenizer：`data/tokenizers/fineweb_1024_bpe.model`
-- 已保留数据处理脚本：`data/cached_challenge_fineweb.py`、`data/download_hf_docs_and_tokenize.py`
-- 已保留主训练基线：`train_gpt.py`
-- 已新增本地输入法原型代码：`src/input_method/`
-- 已新增最小单元测试：`tests/`
-- 尚未实现正式输入法客户端、推理服务、排词模型训练入口和导出格式
+| 项目 | 状态 |
+|------|------|
+| 当前是否为 Windows 系统级输入法 | **否**，当前为 Tkinter 桌面应用原型 |
+| 是否接入真实 LLM 排词 | **否**，`ModelReranker` 为 **STUB** |
+| 日语模式 | **原型阶段**，仅支持基础罗马音转假名 |
+| 候选窗是否跟随系统光标 | **否**，仅跟随 Tkinter Text 控件光标 |
 
-`train_gpt.py` 目前只作为可复用训练基线和重构参考。后续应将它拆分或替换为面向排词任务的训练代码，而不是继续沿用比赛指标和提交约束。
+## 快速启动
 
-## 快速启动与命令手册
+### 安装依赖
 
-### 启动命令
-- **GUI 编辑器（记事本 Demo）**：
-  ```bash
-  python -m src.input_method.app
-  ```
-- **终端模拟器**：
-  ```bash
-  python -m src.input_method.main
-  ```
-
-### 评估与测试命令
-- **候选质量评估**：
-  ```bash
-  python scripts/evaluate_candidates.py
-  ```
-- **响应延迟 Benchmark**：
-  ```bash
-  python scripts/benchmark_latency.py
-  ```
-- **词库扩充/导入脚本**：
-  ```bash
-  python scripts/import_lexicon.py
-  ```
-
-### 交互操作与快捷键
-- **composing 缓冲区输入**：在中文/日语/英文模式下，直接输入字母即可触发匹配。
-- **选择候选词**：按空格选择第一候选，或输入数字键 `1-5` 选择对应编号候选词上屏。
-- **修改缓冲区**：按 `Backspace`（退格键）删除缓冲区末尾的拼音字母。
-- **上屏原始文本**：按 `Enter`（回车键）直接将缓冲区中的原始英文字母上屏。
-- **候选词翻页**：按 `-` 键 (PageUp) 或 `=` 键 (PageDown) 进行候选词列表翻页。
-- **清空用户学习记忆**：
-  - GUI 界面：直接点击顶部工具栏的 **“清空用户记忆”** 按钮。
-  - 终端模式：在缓冲区为空时键入 `/clear_memory` 命令回车即可。
-  - fallback 行交互终端：直接在提示符下输入 `/clear_memory` 即可。
-
-### 词库格式说明
-外部词库文件位于 `data/lexicon/dict.jsonl`，采用每行一条 JSON 格式记录，例如：
-```json
-{"word": "中国", "pinyin": "zhongguo", "short_pinyin": "zg", "freq": 6500, "source": "lexicon"}
+```bash
+pip install -r requirements.txt
 ```
-可通过 `python scripts/import_lexicon.py` 进行重构、合并与自定义扩充。
 
-### 用户记忆文件位置
-默认持久化在用户主目录下：`~/.golf_user_memory.json`，不会被 Git 仓库跟踪，有效保护用户隐私。
+### GUI 图形客户端
 
-### 当前 v0 可试用输入示例
-在中文拼音模式下，请尝试输入以下拼音：
-- `nihao` -> `你好`
-- `nh` -> `你好`
-- `wo` -> `我`
-- `women` -> `我们`
-- `jintian` -> `今天`
-- `zhongguo` -> `中国`
-- `zg` -> `中国`
-- `shurufa` -> `输入法`
-- `xiangyao` -> `想要`
-- `woxiangyao` -> `我想要`
+```bash
+python -m src.input_method.app
+```
 
-### 当前限制 (重要说明)
-1. **非系统级输入法**：目前仅为内置记事本/终端的 Demo，未挂接 Windows/macOS 系统级输入法框架。
-2. **未接入真实 LLM**：机器学习排序 `ModelReranker` 依然为桩类 (STUB)，当前默认使用基于词频与用户记忆的传统 baseline 排序。
-3. **日语模式仅是骨架**：仅内置少数常用罗马字到假名和常用日语词的映射，只用于通路验证，不具备日常日语打字输入能力。
-4. **外部词库仍非工业级**：默认词典为扩充后的 400+ 个高频核心常用词，若需要更大规模输入，须通过 `import_lexicon.py` 导入本地词库。
-5. **评估与性能 Benchmark 仅为小样本 smoke 测试**：运行脚本耗时均是小规模验证，仅为开发冒烟测试，不能作为真实全场景打字质量数据。
+### 终端模拟器
 
-## 当前状态与已实现底座 v0
+```bash
+python -m src.input_method.main
+```
 
-目前，项目已完成了 **输入法底座 v0** 的构建，实现了一个在没有大语言模型时也能勉强可用的基础输入法框架：
+### 使用配置文件
 
-- **外部词库加载框架**：支持从 `data/lexicon/dict.jsonl` 中动态载入高频词库。内置 `RAW_WORDS` 降级为 fallback。
-- **连续拼音切分与候选召回**：在 `PinyinCandidateGenerator` 中内置 400+ 标准汉语拼音音节匹配，支持最大匹配法将输入串进行连续切分（例如 `woxiangyao` -> `['wo', 'xiang', 'yao']`），并实现了组合切分片下的多段短语拼合召回。
-- **用户常用词记忆与权重持久化**：用户选中词后自动累加其在对应输入键下的权重，并对同键下其他候选权重做微衰减，权重自动持久化到本地 `~/.golf_user_memory.json`。支持通过 `engine.clear_user_memory()` 一键清空。
-- **日语输入模式骨架**：预留 `japanese` 模式，在 `JapaneseCandidateGenerator` 中实现了极简罗马音转假名的假名与常见词召回原型。GUI 记事本和终端均增加了切换按钮。
-- **评估与 Benchmark 基准**：提供了自动评估指标脚本 `scripts/evaluate_candidates.py` 和延迟性能评测 `scripts/benchmark_latency.py`。
+```bash
+python -m src.input_method.app --config config/default.json
+python -m src.input_method.main --config config/default.json --mode english --log-level DEBUG
+```
 
-### 🚨 诚实说明 (重要约束)
+### 命令行参数
 
-- **AI 排词模型仍是桩类**：当前默认没有接入真实大语言模型排词，`ModelReranker` 依然是个桩类（STUB）而非完整 AI 模型。
-- **GUI 记事本依然是 Demo**：目前客户端界面仍是一个内置编辑器记事本 Demo，并非挂载到系统级的输入法客户端。
-- **日语模式仅是证明通路的原型骨架**：仅内置了极少数常用假名转换映射，无法进行日常的日语流畅输入。
-- **新评估和性能测试仅为小样本验证**：两脚本仅代表基本开发冒烟测试，不代表最终实际日常使用的打字质量。
-- **详细约束与偏离** 见 `PROJECT_GOALS_AND_READINESS.md`。
+| 参数 | 说明 |
+|------|------|
+| `--mode` / `-m` | 输入模式：pinyin / english / japanese |
+| `--page-size` / `-p` | 每页候选数（默认 5） |
+| `--config` | JSON 配置文件路径 |
+| `--dict-path` | 外部词库路径 |
+| `--use-model` | 启用 AI 排词（STUB） |
+| `--learning-enabled` / `--no-learning` | 启用/禁用用户学习 |
+| `--log-level` | 日志级别：DEBUG/INFO/WARNING/ERROR |
+| `--show-console` | 保留控制台窗口（仅 GUI） |
 
-## 目标架构
+## 词库管理
 
-完整 AI 输入法按以下模块推进：
+### 导入内置词库
 
-1. 客户端输入层
-   - 管理输入缓冲区、光标上下文、候选栏状态和用户选择事件。
-   - 先以本地原型验证交互，再接入系统级输入法框架。
+```bash
+python scripts/import_lexicon.py
+```
 
-2. 候选生成层
-   - 根据拼音、前缀、上下文和词典召回候选词、短语或补全文本。
-   - 首版可以使用规则召回和轻量词表，后续再接入更复杂的生成模型。
+### 导入外部词库
 
-3. 自动排词模型
-   - 输入：上下文、当前 composing 文本、候选列表和可选用户偏好特征。
-   - 输出：每个候选的排序分数。
-   - 训练目标优先使用可解释、可回放的候选排序任务，避免把生成式语言模型指标误当作输入法体验指标。
+```bash
+# JSONL 格式
+python scripts/import_lexicon.py --input my_dict.jsonl --format jsonl --append
 
-4. 本地推理层
-   - 提供低延迟候选排序接口。
-   - 默认离线可用，不依赖网络调用。
-   - 不记录明文用户输入，除非用户明确开启并完成脱敏策略。
+# TSV 格式
+python scripts/import_lexicon.py --input my_dict.tsv --format tsv --append
 
-5. 评估与导出层
-   - 评估排序准确率、首选命中率、Top-K 命中率、延迟和内存占用。
-   - 导出面向本地推理的模型和必要词表，保留可复现实验记录。
+# CSV 格式（自动检测）
+python scripts/import_lexicon.py --input my_dict.csv
+```
 
-## 数据资产
+### 生成合成词库（压测用）
 
-当前可用数据位于 `data/`：
+```bash
+python scripts/generate_synthetic_lexicon.py --count 100000 --output .smoke_data/lexicon_100k.jsonl
+```
 
-- `data/datasets/fineweb10B_sp1024/`：公开语料分词后的二进制 shard，可用于预训练或构造排序任务的启动语料。
-- `data/tokenizers/`：SentencePiece tokenizer 文件。
-- `data/tokenizer_specs.json`：tokenizer 配置。
-- `data/README.md`：数据布局、来源和校验说明。
+### 词库压测
 
-这些数据并不等价于真实输入法日志。后续如需使用用户输入样本，必须默认关闭采集，并要求显式授权、最小化字段、脱敏处理和本地可删除。
+```bash
+python scripts/benchmark_lexicon.py --dict-path data/lexicon/dict.jsonl
+```
 
-## 后续路线
+### 词库格式
 
-短期目标：
+每行一个 JSON 对象（JSONL），字段说明详见 [`data/lexicon/README.md`](data/lexicon/README.md)。
 
-- 定义输入法排词任务的数据样本格式。
-- 从公开语料构造可复现的候选排序训练集。
-- 将 `train_gpt.py` 中可复用的训练、checkpoint、评估逻辑迁移到新的排词训练入口。
-- 建立最小评估集：首选命中率、Top-3 命中率、平均排序损失和推理延迟。
+## 评估
 
-中期目标：
+```bash
+python scripts/evaluate_candidates.py
+```
 
-- 实现本地候选生成与排序推理原型。
-- 建立模型导出格式和加载校验。
-- 增加真实输入法交互层，但保持隐私默认安全。
+输出 Top-1 / Top-3 / Top-5 命中率和召回覆盖率。**注意：当前评估基于小样本测试集，不代表日用质量。**
 
-长期目标：
+## 性能 Benchmark
 
-- 支持个性化词频、领域词库和本地增量学习。
-- 支持多输入模式和多语言扩展。
-- 在不牺牲隐私和延迟的前提下提升候选质量。
+```bash
+# 引擎延迟
+python scripts/benchmark_latency.py
 
-## 开发原则
+# 词库延迟
+python scripts/benchmark_lexicon.py
+```
 
-- 不新增技术债：先复用现有数据和训练基础，再逐步拆分。
-- 不编造能力：文档、命令和指标必须对应真实实现。
-- 不写入明文凭据和用户隐私样本。
-- 不为了短期演示关闭校验、吞异常或硬编码路径。
-- 涉及训练数据、模型导出、推理接口时必须同步更新文档和验证记录。
+## 测试
+
+```bash
+python -m pytest tests/ -q
+```
+
+测试覆盖：引擎状态机、候选生成器、排序器、用户记忆、模式切换、端到端冒烟测试。
+
+## 用户记忆
+
+- 默认保存路径：`~/.golf_user_memory.json`
+- 自动记录用户选词频率，优化排序
+- 同键下其他词自动衰减，支持新词超越旧词
+- 支持通过 `--user-memory-path` 指定自定义路径
+
+### 清空用户记忆
+
+- GUI：点击工具栏"清空用户记忆"按钮
+- 终端：输入 `/clear_memory`
+- 手动删除：`rm ~/.golf_user_memory.json`（Linux/Mac）或 `del %USERPROFILE%\.golf_user_memory.json`（Windows）
+
+## 配置系统
+
+默认配置文件：[`config/default.json`](config/default.json)
+
+支持字段：mode、page_size、max_recall、dict_path、fuzzy_pinyin、candidate_layout、learning_enabled、log_level、theme、font_family、font_size 等。
+
+## Windows 系统级输入法接入路线
+
+**当前 golf 不是 Windows 系统级输入法。** 详细的 TSF/IMM32 接入工程路线见：
+
+📄 [`docs/windows-ime-integration.md`](docs/windows-ime-integration.md)
+
+核心路径：C++/Rust 实现 TSF DLL → Named Pipe/gRPC 与 Python 引擎通信 → regsvr32 注册为系统输入法。
+
+## 项目结构
+
+```
+parameter-golf/
+├── config/default.json              # 默认配置
+├── data/lexicon/                    # 词库
+│   ├── dict.jsonl                   # 主词库
+│   └── README.md                    # 词库格式说明
+├── docs/
+│   └── windows-ime-integration.md   # Windows 系统级接入文档
+├── scripts/
+│   ├── benchmark_latency.py         # 引擎延迟 Benchmark
+│   ├── benchmark_lexicon.py         # 词库延迟 Benchmark
+│   ├── evaluate_candidates.py       # 候选质量评估
+│   ├── generate_synthetic_lexicon.py# 合成词库生成
+│   └── import_lexicon.py            # 词库导入
+├── src/input_method/
+│   ├── config.py                    # 配置系统
+│   ├── engine.py                    # 核心引擎
+│   ├── lexicon.py                   # 词库加载器
+│   ├── user_memory.py               # 用户记忆
+│   ├── app.py                       # GUI 入口
+│   ├── main.py                      # 终端入口
+│   ├── gui_editor.py                # GUI 编辑器
+│   ├── gui_candidate_window.py      # 候选窗口
+│   ├── cli_simulator.py             # 终端模拟器
+│   ├── generator/                   # 候选召回
+│   │   ├── base.py                  # 基类 + Candidate
+│   │   ├── pinyin_generator.py      # 拼音召回
+│   │   ├── english_generator.py     # 英文召回
+│   │   └── japanese_generator.py    # 日语召回（原型）
+│   └── reranker/                    # 候选排序
+│       ├── base.py                  # 基类
+│       ├── frequency_reranker.py    # 传统 baseline
+│       └── model_reranker.py        # AI 排词 (STUB)
+├── tests/                           # 测试
+├── train_gpt.py                     # 待重构训练基线
+├── PROJECT_GOALS_AND_READINESS.md   # 项目目标
+├── 修改记录.md                       # 改动记录
+└── requirements.txt                 # 依赖
+```
+
+## 后续开发优先级
+
+1. 真实词库接入（开源词库、用户自定义词库）
+2. 拼音切分算法优化（多音字、歧义消解）
+3. 传统排序 baseline 持续调优
+4. 用户常用词记忆权重策略优化
+5. 性能 Benchmark 扩展（10万+词库压测）
+6. 真实 LLM 排词接口接入
+7. Windows TSF 系统级输入法 DLL
+8. UI 美化与主题定制
+
+## 许可证
+
+见 [LICENSE](LICENSE)。第三方来源说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

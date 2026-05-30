@@ -25,18 +25,19 @@ def main() -> None:
     parser.add_argument(
         "--mode", "-m",
         choices=["pinyin", "english", "japanese"],
-        default="pinyin",
+        default=None,
         help="指定初始输入法模式: pinyin (中文拼音), english (英文前缀补全) 或 japanese (日语罗马字假名)，默认为 pinyin"
     )
     parser.add_argument(
         "--page-size", "-p",
         type=int,
-        default=5,
+        default=None,
         help="候选词每页显示大小，默认 5"
     )
     parser.add_argument(
         "--use-model",
         action="store_true",
+        default=None,
         help="是否激活排词机器学习模型重排"
     )
     parser.add_argument(
@@ -58,6 +59,32 @@ def main() -> None:
         help="用户记忆持久化路径"
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="JSON 配置文件路径 (例如 config/default.json)"
+    )
+    parser.add_argument(
+        "--learning-enabled",
+        action="store_true",
+        dest="learning_enabled",
+        default=None,
+        help="启用用户学习功能"
+    )
+    parser.add_argument(
+        "--no-learning",
+        action="store_false",
+        dest="learning_enabled",
+        help="禁用用户学习功能"
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default=None,
+        help="日志级别"
+    )
+    parser.add_argument(
         "--show-console",
         action="store_true",
         help="保持命令行控制台窗口可见（用于调试）"
@@ -69,17 +96,12 @@ def main() -> None:
     if not args.show_console:
         hide_console_window()
 
-    # 2. 初始化输入法引擎配置
-    config = InputMethodConfig(
-        mode=args.mode,
-        page_size=args.page_size,
-        use_model_rerank=args.use_model,
-        model_path=args.model_path
-    )
-    if args.dict_path:
-        config.dict_path = args.dict_path
-    if args.user_memory_path:
-        config.user_dict_path = args.user_memory_path
+    # 2. 初始化输入法引擎配置：先从配置文件加载，再用命令行参数覆盖
+    config = InputMethodConfig.from_args_and_file(args, config_path=args.config)
+
+    # 处理 page_size（argparse 中 default=None 以便区分是否显式指定）
+    if args.page_size is not None:
+        config.page_size = args.page_size
 
     engine = InputMethodEngine(config)
 

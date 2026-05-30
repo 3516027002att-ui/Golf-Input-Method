@@ -1,0 +1,26 @@
+{
+    "mode": "pinyin",
+    "page_size": 5,
+    "max_recall": 100,
+    "dict_path": "data/lexicon/dict.jsonl",
+    "user_memory_path": null,
+    "use_model_rerank": false,
+    "model_path": null,
+    "tokenizer_path": "data/tokenizers/fineweb_1024_bpe.model",
+    "fuzzy_pinyin": {
+        "zh_z": false,
+        "ch_c": false,
+        "sh_s": false,
+        "n_l": false,
+        "r_l": false,
+        "ang_an": false,
+        "eng_en": false,
+        "ing_in": false
+    },
+    "candidate_layout": "horizontal",
+    "learning_enabled": true,
+    "log_level": "WARNING",
+    "theme": "dark",
+    "font_family": "Consolas",
+    "font_size": 13
+}

@@ -91,6 +91,10 @@ class InputMethodEngine:
             return True
         return False
 
+    def handle_delete(self) -> bool:
+        """删除键处理，当前与 Backspace 行为一致"""
+        return self.handle_backspace()
+
     def handle_enter(self) -> bool:
         if self.composing:
             raw_text = self.composing
@@ -107,6 +111,15 @@ class InputMethodEngine:
             return False
         self.commit_text(" ")
         return True
+
+    def handle_escape(self) -> bool:
+        """取消当前 composing，清空候选列表"""
+        if self.composing:
+            self.composing = ""
+            self.candidates = []
+            self.page_index = 0
+            return True
+        return False
 
     def handle_candidate_select(self, key_num: int) -> bool:
         return self.select_candidate_on_page(key_num - 1)
@@ -140,6 +153,10 @@ class InputMethodEngine:
         self.reranker = self._build_reranker()
         self.refresh_candidates()
 
+    def set_learning_enabled(self, enabled: bool) -> None:
+        """开启或关闭用户学习功能"""
+        self.config.learning_enabled = enabled
+
     def clear_user_memory(self) -> None:
         self.user_memory.clear()
         self.refresh_candidates()
@@ -156,7 +173,7 @@ class InputMethodEngine:
         if 0 <= index_on_page < len(current_page):
             selected_cand = current_page[index_on_page]
             input_key = self.composing
-            if input_key:
+            if input_key and self.config.learning_enabled:
                 self.user_memory.record_selection(selected_cand.text, input_key)
             self.commit_text(selected_cand.text)
             return True
@@ -171,6 +188,18 @@ class InputMethodEngine:
         if not self.candidates:
             return 0
         return (len(self.candidates) + self.config.page_size - 1) // self.config.page_size
+
+    def get_debug_scores(self) -> List[dict]:
+        """返回当前所有候选的调试分数信息"""
+        return [
+            {
+                "text": c.text,
+                "score": c.score,
+                "source": c.source,
+                "debug_info": c.debug_info,
+            }
+            for c in self.candidates
+        ]
 
     def clear(self) -> None:
         self.composing = ""

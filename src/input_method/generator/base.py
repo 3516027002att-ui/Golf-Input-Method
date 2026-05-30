@@ -16,6 +16,9 @@ class Candidate:
     # 候选词来源 (例如 "dict", "association", "tokenizer", "user")
     source: str = "dict"
 
+    # 调试信息：可解释排序分数明细 (仅 debug 模式下填充)
+    debug_info: str = ""
+
     def __repr__(self) -> str:
         return f"Candidate(text='{self.text}', composing='{self.composing_covered}', score={self.score:.4f}, source='{self.source}')"
 

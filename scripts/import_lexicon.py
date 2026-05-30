@@ -490,50 +490,95 @@ def main():
         action="store_true",
         help="是否以追加模式合并到现有词典中，默认覆盖"
     )
+    parser.add_argument(
+        "--format", "-f",
+        type=str,
+        choices=["auto", "jsonl", "tsv", "csv"],
+        default="auto",
+        help="输入文件格式: auto(自动检测), jsonl, tsv, csv。默认 auto"
+    )
     args = parser.parse_args()
 
     # 1. 准备要导入的条目
     imported_entries = []
 
+    bad_line_count = 0
+
     if args.input:
         if not os.path.exists(args.input):
             print(f"错误: 输入文件不存在: {args.input}")
             sys.exit(1)
-        print(f"正在从外部文件 {args.input} 导入词表...")
-        with open(args.input, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                # 支持逗号、Tab、空格分隔
-                delimiters = [",", "\t", " "]
-                parts = []
-                for d in delimiters:
-                    if d in line:
-                        parts = [p.strip() for p in line.split(d) if p.strip()]
-                        break
-                if not parts:
-                    parts = [line]
 
-                if len(parts) >= 2:
-                    word = parts[0]
-                    pinyin = parts[1]
-                    short_pinyin = parts[2] if len(parts) >= 3 else "".join([ch[0] for ch in pinyin.split() if ch])
-                    freq = 1000.0
-                    if len(parts) >= 4:
-                        try:
-                            freq = float(parts[3])
-                        except ValueError:
-                            pass
-                    imported_entries.append({
-                        "word": word,
-                        "pinyin": pinyin,
-                        "short_pinyin": short_pinyin,
-                        "freq": freq,
-                        "source": "imported"
-                    })
-                else:
-                    print(f"警告: 忽略第 {idx} 行非法格式: {line}")
+        # 自动检测格式
+        fmt = args.format
+        if fmt == "auto":
+            if args.input.endswith(".jsonl"):
+                fmt = "jsonl"
+            elif args.input.endswith(".tsv"):
+                fmt = "tsv"
+            else:
+                fmt = "csv"
+
+        print(f"正在从外部文件 {args.input} 导入词表 (格式: {fmt})...")
+
+        if fmt == "jsonl":
+            # JSONL 格式导入
+            with open(args.input, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        imported_entries.append({
+                            "word": data["word"],
+                            "pinyin": data["pinyin"],
+                            "short_pinyin": data.get("short_pinyin", ""),
+                            "freq": float(data.get("freq", 1000.0)),
+                            "source": data.get("source", "imported"),
+                            "domain": data.get("domain", ""),
+                            "enabled": data.get("enabled", True),
+                        })
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        bad_line_count += 1
+                        print(f"警告: 第 {idx} 行解析失败: {e}")
+        else:
+            # TSV/CSV 格式导入
+            with open(args.input, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # 支持逗号、Tab、空格分隔
+                    delimiters = [",", "\t", " "] if fmt == "csv" else ["\t"]
+                    parts = []
+                    for d in delimiters:
+                        if d in line:
+                            parts = [p.strip() for p in line.split(d) if p.strip()]
+                            break
+                    if not parts:
+                        parts = [line]
+
+                    if len(parts) >= 2:
+                        word = parts[0]
+                        pinyin = parts[1]
+                        short_pinyin = parts[2] if len(parts) >= 3 else "".join([ch[0] for ch in pinyin.split() if ch])
+                        freq = 1000.0
+                        if len(parts) >= 4:
+                            try:
+                                freq = float(parts[3])
+                            except ValueError:
+                                pass
+                        imported_entries.append({
+                            "word": word,
+                            "pinyin": pinyin,
+                            "short_pinyin": short_pinyin,
+                            "freq": freq,
+                            "source": "imported"
+                        })
+                    else:
+                        bad_line_count += 1
+                        print(f"警告: 忽略第 {idx} 行非法格式: {line}")
     else:
         print("未指定外部文件，将导入内置的 ~500 个高频极简词库...")
         imported_entries = parse_csv_lexicon(DEFAULT_LEXICON_CSV)
@@ -590,7 +635,13 @@ def main():
             for entry in final_entries:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         print(f"成功导出词表到: {args.output}")
-        print(f"本次新增/合并词条: {added_count} 个，总计有效词条数: {len(final_entries)} 个。")
+        print(f"\n=== 导入报告 ===")
+        print(f"总行数: {len(imported_entries) + bad_line_count}")
+        print(f"有效条数: {len(imported_entries)}")
+        print(f"坏行数: {bad_line_count}")
+        print(f"新增词条: {added_count}")
+        print(f"重复合并: {len(imported_entries) - added_count}")
+        print(f"最终词条数: {len(final_entries)}")
     except Exception as e:
         print(f"错误: 写入输出文件失败: {e}")
         sys.exit(1)

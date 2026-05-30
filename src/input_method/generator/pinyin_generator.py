@@ -6,58 +6,58 @@ from ..lexicon import LexiconLoader
 
 logger = logging.getLogger(__name__)
 
-# 预内置 fallback 常用词库：(词语, 全拼, 简拼, 静态词频, 来源)
+# 预内�?fallback 常用词库�?词语, 全拼, 简�? 静态词�? 来源)
 RAW_WORDS: List[Tuple[str, str, str, float, str]] = [
-    ("的", "de", "d", 9900, "dict"),
-    ("是", "shi", "s", 9500, "dict"),
-    ("了", "le", "l", 9000, "dict"),
-    ("在", "zai", "z", 8500, "dict"),
-    ("我", "wo", "w", 8000, "dict"),
-    ("你", "ni", "n", 7900, "dict"),
-    ("他", "ta", "t", 7000, "dict"),
-    ("她", "ta", "t", 6500, "dict"),
-    ("它", "ta", "t", 6000, "dict"),
-    ("们", "men", "m", 6800, "dict"),
+    ("�?, "de", "d", 9900, "dict"),
+    ("�?, "shi", "s", 9500, "dict"),
+    ("�?, "le", "l", 9000, "dict"),
+    ("�?, "zai", "z", 8500, "dict"),
+    ("�?, "wo", "w", 8000, "dict"),
+    ("�?, "ni", "n", 7900, "dict"),
+    ("�?, "ta", "t", 7000, "dict"),
+    ("�?, "ta", "t", 6500, "dict"),
+    ("�?, "ta", "t", 6000, "dict"),
+    ("�?, "men", "m", 6800, "dict"),
     ("我们", "women", "wm", 7800, "dict"),
     ("你们", "nimen", "nm", 7300, "dict"),
     ("他们", "tamen", "tm", 7100, "dict"),
-    ("有", "you", "y", 6800, "dict"),
-    ("个", "ge", "g", 6600, "dict"),
-    ("好", "hao", "h", 6500, "dict"),
+    ("�?, "you", "y", 6800, "dict"),
+    ("�?, "ge", "g", 6600, "dict"),
+    ("�?, "hao", "h", 6500, "dict"),
     ("你好", "nihao", "nh", 6700, "dict"),
-    ("你好啊", "nihaoa", "nha", 4500, "dict"),
-    ("这", "zhe", "z", 6400, "dict"),
-    ("想", "xiang", "x", 6500, "dict"),
-    ("要", "yao", "y", 6300, "dict"),
+    ("你好�?, "nihaoa", "nha", 4500, "dict"),
+    ("�?, "zhe", "z", 6400, "dict"),
+    ("�?, "xiang", "x", 6500, "dict"),
+    ("�?, "yao", "y", 6300, "dict"),
     ("想要", "xiangyao", "xy", 6100, "dict"),
-    ("国", "guo", "g", 6200, "dict"),
+    ("�?, "guo", "g", 6200, "dict"),
     ("中国", "zhongguo", "zg", 6500, "dict"),
-    ("人", "ren", "r", 6100, "dict"),
-    ("和", "he", "h", 6000, "dict"),
-    ("用", "yong", "y", 5900, "dict"),
-    ("作", "zuo", "z", 5800, "dict"),
-    ("时", "shi", "s", 5700, "dict"),
-    ("去", "qu", "q", 5600, "dict"),
-    ("来", "lai", "l", 5500, "dict"),
-    ("会", "hui", "h", 5400, "dict"),
-    ("能", "neng", "n", 5300, "dict"),
-    ("对", "dui", "d", 5200, "dict"),
-    ("都", "dou", "d", 5100, "dict"),
-    ("多", "duo", "d", 5000, "dict"),
-    ("少", "shao", "s", 4500, "dict"),
+    ("�?, "ren", "r", 6100, "dict"),
+    ("�?, "he", "h", 6000, "dict"),
+    ("�?, "yong", "y", 5900, "dict"),
+    ("�?, "zuo", "z", 5800, "dict"),
+    ("�?, "shi", "s", 5700, "dict"),
+    ("�?, "qu", "q", 5600, "dict"),
+    ("�?, "lai", "l", 5500, "dict"),
+    ("�?, "hui", "h", 5400, "dict"),
+    ("�?, "neng", "n", 5300, "dict"),
+    ("�?, "dui", "d", 5200, "dict"),
+    ("�?, "dou", "d", 5100, "dict"),
+    ("�?, "duo", "d", 5000, "dict"),
+    ("�?, "shao", "s", 4500, "dict"),
     ("多少", "duoshao", "ds", 4700, "dict"),
-    ("没", "mei", "m", 4400, "dict"),
+    ("�?, "mei", "m", 4400, "dict"),
     ("没有", "meiyou", "my", 4800, "dict"),
     ("怎么", "zenme", "zm", 4300, "dict"),
-    ("什么", "shenme", "sm", 4600, "dict"),
-    ("为什么", "weishenme", "wsm", 4200, "dict"),
+    ("什�?, "shenme", "sm", 4600, "dict"),
+    ("为什�?, "weishenme", "wsm", 4200, "dict"),
     ("觉得", "juede", "jd", 4100, "dict"),
     ("知道", "zhidao", "zd", 4050, "dict"),
     ("可以", "keyi", "ky", 4000, "dict"),
     ("现在", "xianzai", "xz", 3900, "dict"),
     ("今天", "jintian", "jt", 3800, "dict"),
     ("明天", "mingtian", "mt", 3700, "dict"),
-    ("输入法", "shurufa", "srf", 3600, "dict"),
+    ("输入�?, "shurufa", "srf", 3600, "dict"),
     ("自动排词", "zidongpaici", "zdpc", 3500, "dict"),
     ("模型", "moxing", "mx", 3400, "dict"),
     ("测试", "ceshi", "cs", 3300, "dict"),
@@ -65,7 +65,7 @@ RAW_WORDS: List[Tuple[str, str, str, float, str]] = [
     ("优秀", "youxiu", "yx", 3100, "dict"),
     ("框架", "kuangjia", "kj", 3000, "dict"),
     ("非常", "feichang", "fc", 2900, "dict"),
-    ("开发", "kaifa", "kf", 2800, "dict"),
+    ("开�?, "kaifa", "kf", 2800, "dict"),
     ("代码", "daima", "dm", 2700, "dict"),
     ("程序", "chengxu", "cx", 2600, "dict"),
     ("系统", "xitong", "xt", 2500, "dict"),
@@ -96,17 +96,17 @@ RAW_WORDS: List[Tuple[str, str, str, float, str]] = [
 ]
 
 ASSOCIATION_DICT: Dict[str, List[str]] = {
-    "我": ["们", "觉得", "喜欢", "在写代码", "去过了", "知道"],
-    "你": ["好", "们", "在干嘛", "去哪里", "觉得", "可以"],
-    "我们": ["一起", "去", "觉得", "开始", "是", "大家"],
-    "你们": ["觉得", "去哪里", "在干嘛", "大家"],
-    "他们": ["觉得", "去哪里", "大家"],
-    "中国": ["人", "历史", "文化", "制造", "科学"],
-    "今天": ["天气", "真开心", "去吃什么", "星期几", "工作"],
-    "谢谢": ["你", "大家", "您的支持"],
+    "�?: ["�?, "觉得", "喜欢", "在写代码", "去过�?, "知道"],
+    "�?: ["�?, "�?, "在干�?, "去哪�?, "觉得", "可以"],
+    "我们": ["一�?, "�?, "觉得", "开�?, "�?, "大家"],
+    "你们": ["觉得", "去哪�?, "在干�?, "大家"],
+    "他们": ["觉得", "去哪�?, "大家"],
+    "中国": ["�?, "历史", "文化", "制�?, "科学"],
+    "今天": ["天气", "真开�?, "去吃什�?, "星期�?, "工作"],
+    "谢谢": ["�?, "大家", "您的支持"],
     "自动": ["排词", "控制", "生成"],
-    "输入": ["法", "核心", "缓冲区"],
-    "优秀": ["的", "框架", "作品"],
+    "输入": ["�?, "核心", "缓冲�?],
+    "优秀": ["�?, "框架", "作品"],
 }
 
 PINYIN_SYLLABLES = {
@@ -153,23 +153,52 @@ PINYIN_SYLLABLES = {
 
 
 class PinyinCandidateGenerator(BaseCandidateGenerator):
-    """拼音候选词召回器，支持全拼、简拼、前缀和最小连续切分。"""
+    """拼音候选词召回器，支持全拼、简拼、前缀和最小连续切分�?
+    内部使用四类索引加速查询，避免全表扫描�?    - exact_pinyin_index:  pinyin -> [(word, freq, source), ...]
+    - exact_short_index:   short_pinyin -> [(word, pinyin, freq, source), ...]
+    - prefix_buckets:      first_char -> [(word, pinyin, short, freq, source), ...]
+    """
 
     def __init__(self, dict_path: str = None, max_recall: int = 100):
         self.max_recall = max_recall
         self.words: List[Tuple[str, str, str, float, str]] = list(RAW_WORDS)
         if dict_path and os.path.exists(dict_path):
             try:
-                entries = LexiconLoader.load_from_jsonl(dict_path)
+                entries, bad_count = LexiconLoader.load_from_jsonl(dict_path)
                 self.words.extend(
                     (e.word, e.pinyin, e.short_pinyin, float(e.freq), "dict")
                     for e in entries
+                    if e.enabled
                 )
+                if bad_count > 0:
+                    logger.warning("词库加载完成但有 %d 行解析失�?(path=%s)", bad_count, dict_path)
             except Exception:
-                logger.warning("外部拼音词库加载失败 (path=%s)，降级使用内置词库", dict_path, exc_info=True)
+                logger.warning("外部拼音词库加载失败 (path=%s)，降级使用内置词�?, dict_path, exc_info=True)
+
+        # ---- 构建索引 ----
+        # 精确拼音索引: pinyin -> [(word, freq, source)]
+        self._exact_pinyin: Dict[str, List[Tuple[str, float, str]]] = {}
+        # 精确简拼索�? short -> [(word, pinyin, freq, source)]
+        self._exact_short: Dict[str, List[Tuple[str, str, float, str]]] = {}
+        # 拼音前缀�? 首字�?-> [(word, pinyin, short, freq, source)]
+        self._prefix_buckets: Dict[str, List[Tuple[str, str, str, float, str]]] = {}
+
+        for word, pinyin, short, freq, source in self.words:
+            freq_f = float(freq)
+            # exact pinyin
+            self._exact_pinyin.setdefault(pinyin, []).append((word, freq_f, source))
+            # exact short
+            if short:
+                self._exact_short.setdefault(short, []).append((word, pinyin, freq_f, source))
+            # prefix bucket by first char of pinyin
+            if pinyin:
+                bucket_key = pinyin[0]
+                self._prefix_buckets.setdefault(bucket_key, []).append(
+                    (word, pinyin, short, freq_f, source)
+                )
 
     def split_pinyin(self, text: str) -> List[str]:
-        """正向最大匹配切分；末尾不完整片段作为前缀保留。"""
+        """正向最大匹配切分；末尾不完整片段作为前缀保留�?""
         text = text.lower().strip()
         result: List[str] = []
         i = 0
@@ -190,16 +219,19 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
         return result
 
     def _words_for_exact_pinyin(self, pinyin_key: str) -> List[Tuple[str, float]]:
-        matches: List[Tuple[str, float]] = []
-        for word, pinyin, _, freq, _ in self.words:
-            if pinyin == pinyin_key:
-                matches.append((word, float(freq)))
-        return sorted(matches, key=lambda item: item[1], reverse=True)[:3]
+        """通过精确拼音索引查找候选，返回 [(word, freq)]，按频率降序，最�?个�?""
+        entries = self._exact_pinyin.get(pinyin_key, [])
+        sorted_entries = sorted(entries, key=lambda item: item[1], reverse=True)
+        return [(w, f) for w, f, _ in sorted_entries[:3]]
 
     def _segmented_candidates(self, composing: str) -> List[Candidate]:
         segments = self.split_pinyin(composing)
         if len(segments) < 2 or any(len(seg) <= 1 for seg in segments):
             return []
+
+        # 限制切分段数防止组合爆炸
+        if len(segments) > 8:
+            segments = segments[:8]
 
         options = [self._words_for_exact_pinyin(seg) for seg in segments]
         if any(not opt for opt in options):
@@ -208,6 +240,8 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
         candidates: List[Candidate] = []
 
         def build(index: int, text_parts: List[str], score_parts: List[float]) -> None:
+            if len(candidates) >= 20:  # 限制组合数量
+                return
             if index == len(options):
                 phrase = "".join(text_parts)
                 avg_score = sum(score_parts) / max(len(score_parts), 1)
@@ -248,26 +282,45 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
                             break
             return candidates
 
-        for word, pinyin, short, freq, _source in self.words:
-            freq = float(freq)
-            if pinyin == composing:
-                candidates.append(
-                    Candidate(word, composing, freq * 1.5, "dict_exact_pinyin")
-                )
-            elif short == composing:
-                candidates.append(
-                    Candidate(word, composing, freq * 1.2, "dict_exact_short")
-                )
-            elif pinyin.startswith(composing):
-                ratio = len(composing) / len(pinyin)
-                candidates.append(
-                    Candidate(word, composing, freq * 0.8 * ratio, "dict_prefix_pinyin")
-                )
-            elif short.startswith(composing) and len(short) > 1:
-                ratio = len(composing) / len(short)
-                candidates.append(
-                    Candidate(word, composing, freq * 0.6 * ratio, "dict_prefix_short")
-                )
+        # 1. 精确拼音匹配 (O(1) 索引查找)
+        exact_hits = self._exact_pinyin.get(composing, [])
+        for word, freq, _source in exact_hits:
+            candidates.append(
+                Candidate(word, composing, freq * 1.5, "dict_exact_pinyin")
+            )
 
-        candidates.extend(self._segmented_candidates(composing))
+        # 2. 精确简拼匹�?(O(1) 索引查找)
+        short_hits = self._exact_short.get(composing, [])
+        for word, pinyin, freq, _source in short_hits:
+            candidates.append(
+                Candidate(word, composing, freq * 1.2, "dict_exact_short")
+            )
+
+        # 3. 前缀匹配 (只扫描同首字母桶)
+        if composing:
+            bucket_key = composing[0]
+            bucket = self._prefix_buckets.get(bucket_key, [])
+            prefix_count = 0
+            for word, pinyin, short, freq, _source in bucket:
+                # 跳过已经精确匹配过的
+                if pinyin == composing:
+                    continue
+                if pinyin.startswith(composing):
+                    ratio = len(composing) / len(pinyin)
+                    candidates.append(
+                        Candidate(word, composing, freq * 0.8 * ratio, "dict_prefix_pinyin")
+                    )
+                    prefix_count += 1
+                    if prefix_count >= self.max_recall:
+                        break
+                elif short and short != composing and short.startswith(composing) and len(short) > 1:
+                    ratio = len(composing) / len(short)
+                    candidates.append(
+                        Candidate(word, composing, freq * 0.6 * ratio, "dict_prefix_short")
+                    )
+                    prefix_count += 1
+                    if prefix_count >= self.max_recall:
+                        break
+
+        # 4. 连续切分候�?        candidates.extend(self._segmented_candidates(composing))
         return self._deduplicate_and_truncate(candidates, self.max_recall)
