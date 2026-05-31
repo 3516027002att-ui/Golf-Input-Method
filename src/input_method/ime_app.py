@@ -360,12 +360,16 @@ class GolfImeApp:
         logger.info("golf 系统 IME 已启动")
 
     def stop(self) -> None:
+        if not self._running:
+            return  # 防止重复停止
+        self._running = False
         if self._ime_host:
             self._ime_host.stop()
+            self._ime_host = None
         if self._cand_win:
             self._cand_win.destroy()
+            self._cand_win = None
         self._tray.stop()
-        self._running = False
         self._root.quit()
 
     def toggle_enabled(self) -> None:
