@@ -333,21 +333,31 @@ class PinyinCandidateGenerator(BaseCandidateGenerator):
 
         correction = self._deduplicate_and_truncate(correction_candidates, 20)
 
-        # 规则：纠错候选不得挤占第 1 位精确匹配候选
-        # 默认放在第 4-8 位之间 (0-indexed: 3-7)
+        # 规则：纠错候选不得挤占第 1 位（1-indexed）精确匹配候选
+        # 默认将纠错候选放在第 4-8 位之间 (0-indexed: 3-7)
         # 若无普通候选且有高置信纠错，放在第 2-4 位之间 (0-indexed: 1-3)
         has_normal = len(normal) > 0
         if has_normal:
             insert_at = min(max(3, len(normal)), 7)
         else:
-            insert_at = 1  # 无普通候选时从第 2 位开始
+            insert_at = 1  # 无普通候选时从第 2 位(0-indexed:1)开始
 
-        merged = normal[:insert_at]
+        # 头部：insert_at 个普通候选（不足时从尾部补齐）
+        head = list(normal[:insert_at])
+        tail = list(normal[insert_at:])
+        while len(head) < insert_at and tail:
+            head.append(tail.pop(0))
+
+        merged = head
         for corr in correction:
             if len(merged) >= self.max_recall:
                 break
             if corr.text not in {c.text for c in merged}:
                 merged.append(corr)
-        merged.extend([c for c in normal[insert_at:] if c.text not in {m.text for m in merged}])
+        for c in tail:
+            if len(merged) >= self.max_recall:
+                break
+            if c.text not in {m.text for m in merged}:
+                merged.append(c)
 
         return merged[:self.max_recall]
