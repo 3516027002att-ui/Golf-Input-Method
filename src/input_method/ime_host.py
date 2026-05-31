@@ -51,14 +51,7 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("scanCode", ctypes.wintypes.DWORD),
         ("flags", ctypes.wintypes.DWORD),
         ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.wintypes.ULONG),
-    ]
-
-
-class INPUT_U(ctypes.Structure):
-    _fields_ = [
-        ("type", ctypes.wintypes.DWORD),
-        ("ki", ctypes.c_ubyte * 32),  # placeholder for KEYBDINPUT union
+        ("dwExtraInfo", ctypes.c_ulonglong),  # ULONG_PTR: 8字节(64位)
     ]
 
 
@@ -100,6 +93,25 @@ class KeyEvent:
         self.is_keydown = is_keydown
 
 
+# ── SendInput 结构（模块级定义，避免重复创建）──
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.wintypes.WORD),
+        ("wScan", ctypes.wintypes.WORD),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_ulonglong),  # ULONG_PTR: 8字节(64位)/4字节(32位)
+    ]
+
+
+class _INPUT_STRUCT(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.wintypes.DWORD),
+        ("ki", _KEYBDINPUT),
+    ]
+
+
 # ── 文本注入器 ──
 
 class TextInjector:
@@ -114,24 +126,7 @@ class TextInjector:
     @staticmethod
     def inject_key(vk_code: int, keydown: bool = True) -> None:
         """注入虚拟键事件。"""
-        user32 = ctypes.windll.user32
-
-        class KEYBDINPUT(ctypes.Structure):
-            _fields_ = [
-                ("wVk", ctypes.wintypes.WORD),
-                ("wScan", ctypes.wintypes.WORD),
-                ("dwFlags", ctypes.wintypes.DWORD),
-                ("time", ctypes.wintypes.DWORD),
-                ("dwExtraInfo", ctypes.wintypes.ULONG),
-            ]
-
-        class INPUT_STRUCT(ctypes.Structure):
-            _fields_ = [
-                ("type", ctypes.wintypes.DWORD),
-                ("ki", KEYBDINPUT),
-            ]
-
-        inp = INPUT_STRUCT()
+        inp = _INPUT_STRUCT()
         inp.type = INPUT_KEYBOARD
         inp.ki.wVk = vk_code
         inp.ki.wScan = 0
@@ -143,23 +138,8 @@ class TextInjector:
 
 def _send_unicode_char(user32, ch: str) -> None:
     """发送单个 Unicode 字符。"""
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", ctypes.wintypes.WORD),
-            ("wScan", ctypes.wintypes.WORD),
-            ("dwFlags", ctypes.wintypes.DWORD),
-            ("time", ctypes.wintypes.DWORD),
-            ("dwExtraInfo", ctypes.wintypes.ULONG),
-        ]
-
-    class INPUT_STRUCT(ctypes.Structure):
-        _fields_ = [
-            ("type", ctypes.wintypes.DWORD),
-            ("ki", KEYBDINPUT),
-        ]
-
     val = ord(ch)
-    inp = INPUT_STRUCT()
+    inp = _INPUT_STRUCT()
     inp.type = INPUT_KEYBOARD
     inp.ki.wVk = 0
     inp.ki.wScan = val
@@ -382,20 +362,20 @@ class ImeBridge:
 
         vk = event.vk_code
 
-        # Ctrl+Shift+Q 退出 IME
+        # Ctrl+Shift+Q 退出 IME（在钩子线程中验证，通过特殊 char 标记传递）
         if vk == self.VK_Q:
             ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
             shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
             if ctrl and shift:
-                self._pending_queue.put(KeyEvent(vk, "", True))
+                self._pending_queue.put(KeyEvent(vk, "\x01", True))  # \x01 = 退出标记
                 return True
 
-        # Ctrl+Shift 切换中英文
+        # Ctrl+Shift 切换中英文（在钩子线程中验证，通过特殊 char 标记传递）
         if vk == self.VK_SHIFT or vk == self.VK_CONTROL:
             ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
             shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
             if ctrl and shift:
-                self._pending_queue.put(KeyEvent(vk, "", True))
+                self._pending_queue.put(KeyEvent(vk, "\x02", True))  # \x02 = 切换标记
                 return True
 
         # 英文模式完全不拦截
@@ -435,25 +415,19 @@ class ImeBridge:
         vk = event.vk_code
         char = event.char
 
-        # Ctrl+Shift+Q 退出
-        if vk == self.VK_Q and not char:
-            ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
-            shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
-            if ctrl and shift and self._on_exit:
-                logger.info("热键退出 IME")
-                self._on_exit()
-                return
+        # Ctrl+Shift+Q 退出（标记 \x01 已在钩子线程中验证）
+        if char == "\x01" and self._on_exit:
+            logger.info("热键退出 IME")
+            self._on_exit()
+            return
 
-        # Ctrl+Shift 切换中英文
-        if vk in (self.VK_SHIFT, self.VK_CONTROL) and not char:
-            ctrl = ctypes.windll.user32.GetAsyncKeyState(self.VK_CONTROL) & 0x8000
-            shift = ctypes.windll.user32.GetAsyncKeyState(self.VK_SHIFT) & 0x8000
-            if ctrl and shift:
-                new = "english" if eng.config.mode == "pinyin" else "pinyin"
-                eng.switch_mode(new)
-                self._on_update_ui()
-                logger.info("热键切换模式: %s", new.upper())
-                return
+        # Ctrl+Shift 切换中英文（标记 \x02 已在钩子线程中验证）
+        if char == "\x02":
+            new = "english" if eng.config.mode == "pinyin" else "pinyin"
+            eng.switch_mode(new)
+            self._on_update_ui()
+            logger.info("热键切换模式: %s", new.upper())
+            return
 
         # 退格
         if vk == VK_BACK:
