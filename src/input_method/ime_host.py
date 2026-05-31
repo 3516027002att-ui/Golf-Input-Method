@@ -200,6 +200,9 @@ class CaretTracker:
         return buf.value or ""
 
 
+# 全局 pin 列表：防止 ctypes 回调在 Python 退出时被提前释放导致 segfault
+_pinned_callbacks: list = []
+
 # ── 全局键盘钩子 ──
 
 class GlobalKeyboardHook:
@@ -216,6 +219,7 @@ class GlobalKeyboardHook:
         self._hook_id: Optional[int] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._ready = threading.Event()  # 钩子线程就绪信号
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
 
@@ -248,9 +252,14 @@ class GlobalKeyboardHook:
         """在后台线程中安装钩子并启动消息循环。"""
         if self._running:
             return
+        self._ready.clear()
         self._running = True
-        self._thread = threading.Thread(target=self._hook_thread, daemon=True, name="golf-ime-hook")
+        self._thread = threading.Thread(target=self._hook_thread, daemon=False, name="golf-ime-hook")
         self._thread.start()
+        # 等待钩子线程就绪（最多 3 秒）
+        if not self._ready.wait(timeout=3):
+            logger.error("钩子线程启动超时")
+            self._running = False
 
     def _hook_thread(self) -> None:
         """钩子线程入口：安装钩子 + 消息循环。"""
@@ -271,6 +280,9 @@ class GlobalKeyboardHook:
 
         logger.info("全局键盘钩子已安装 (hook_id=%d)", self._hook_id)
 
+        # 通知主线程：钩子已就绪
+        self._ready.set()
+
         # Windows 消息循环（钩子需要）
         msg = ctypes.create_string_buffer(28)
         while self._running:
@@ -286,12 +298,22 @@ class GlobalKeyboardHook:
         if self._hook_id:
             self._user32.UnhookWindowsHookEx(self._hook_id)
             self._hook_id = None
+        # 回调保留在 self._hook_proc 以便下次 start 重用
+        # pin 到全局列表防止 Python 退出时 GC 导致的 segfault
+        if self._hook_proc is not None and self._hook_proc not in _pinned_callbacks:
+            _pinned_callbacks.append(self._hook_proc)
 
     def stop(self) -> None:
         self._running = False
         if self._thread and self._thread.is_alive():
-            self._user32.PostThreadMessageW(self._thread.ident, 0x0012, 0, 0)  # WM_QUIT
-            self._thread.join(timeout=2)
+            # 等待钩子就绪再发 WM_QUIT
+            if self._ready.wait(timeout=3):
+                self._user32.PostThreadMessageW(self._thread.ident, 0x0012, 0, 0)
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                logger.warning("钩子线程未能及时退出")
+        self._thread = None
+        self._hook_id = None
 
 
 def _vk_to_char(vk: int, flags: int) -> str:
