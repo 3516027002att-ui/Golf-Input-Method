@@ -64,3 +64,17 @@ data/datasets/fineweb10B_sp1024/
 - 评估指标：首选命中率、Top-K 命中率、平均排序损失和推理延迟。
 
 任何用户输入日志都必须默认关闭采集。只有在用户明确授权后，才能在本地最小化记录，并且必须提供脱敏和删除机制。
+
+## Context reranker v2 数据审计
+
+`training/context_reranker_v2.py` 的数据入口服务于上下文选词实验台，默认不把 `static_rank`、`freq`、`source`、`domain` 等强旁路特征喂给神经模型。这些字段仍然必须保留在数据中，用于 baseline、审计和后续 hybrid 消融。
+
+新增审计入口：
+
+```bash
+python training/context_reranker_v2.py audit-splits --train <train.jsonl> --val <val.jsonl> --test <test.jsonl> --report <audit.md>
+```
+
+报告会固定输出物理行数、有效/丢弃样本数、候选数量、`target_index` 分布、source/domain/license 分布、候选第一 baseline、static-rank baseline、frequency baseline、random baseline、recall@10/30/100、train-to-val/test 记忆 baseline、split 重复签名、候选生成器偏置和困难负例比例。
+
+如果 `candidates[0]` baseline 已经接近满分、no-context 与 online-context 差距很小、或 train/val/test 出现 `source_doc_key` / 完整样本 / `raw_input + target` 泄漏，当前数据不能用来证明 reranker 学会了上下文。

@@ -53,7 +53,7 @@ get_cosine_schedule_with_warmup = None
 _TRAINING_IMPORT_ERROR: Optional[BaseException] = None
 
 
-def _try_import_training_deps() -> None:
+def _try_import_training_deps(*, include_transformers: bool = True) -> None:
     global torch, F, nn, Dataset, DataLoader
     global AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
     global _TRAINING_IMPORT_ERROR
@@ -64,9 +64,6 @@ def _try_import_training_deps() -> None:
         from torch import nn as nn_module
         from torch.utils.data import DataLoader as data_loader_class
         from torch.utils.data import Dataset as dataset_class
-        from transformers import AutoModel as auto_model_class
-        from transformers import AutoTokenizer as auto_tokenizer_class
-        from transformers import get_cosine_schedule_with_warmup as schedule_fn
     except ImportError as exc:
         _TRAINING_IMPORT_ERROR = exc
         return
@@ -76,6 +73,18 @@ def _try_import_training_deps() -> None:
     nn = nn_module
     Dataset = dataset_class
     DataLoader = data_loader_class
+    if not include_transformers:
+        _TRAINING_IMPORT_ERROR = None
+        return
+
+    try:
+        from transformers import AutoModel as auto_model_class
+        from transformers import AutoTokenizer as auto_tokenizer_class
+        from transformers import get_cosine_schedule_with_warmup as schedule_fn
+    except ImportError as exc:
+        _TRAINING_IMPORT_ERROR = exc
+        return
+
     AutoModel = auto_model_class
     AutoTokenizer = auto_tokenizer_class
     get_cosine_schedule_with_warmup = schedule_fn
@@ -83,15 +92,15 @@ def _try_import_training_deps() -> None:
 
 
 def require_training_deps() -> None:
-    if _TRAINING_IMPORT_ERROR is not None:
-        _try_import_training_deps()
-    if _TRAINING_IMPORT_ERROR is not None:
+    if _TRAINING_IMPORT_ERROR is not None or AutoModel is None or AutoTokenizer is None:
+        _try_import_training_deps(include_transformers=True)
+    if _TRAINING_IMPORT_ERROR is not None or AutoModel is None or AutoTokenizer is None:
         raise RuntimeError(
             "Training/eval requires torch and transformers. Install them before running train/eval."
         ) from _TRAINING_IMPORT_ERROR
 
 
-_try_import_training_deps()
+_try_import_training_deps(include_transformers=False)
 
 
 class Defaults:
@@ -108,6 +117,26 @@ class Defaults:
     weight_decay = float(os.environ.get("CONTEXT_RERANKER_WEIGHT_DECAY", "0.01"))
     warmup_ratio = float(os.environ.get("CONTEXT_RERANKER_WARMUP_RATIO", "0.06"))
     seed = int(os.environ.get("CONTEXT_RERANKER_SEED", "1337"))
+
+
+CONTEXT_MODES = {"online", "edit", "none"}
+CONTEXT_PERTURBS = {"none", "shuffle", "empty"}
+CANDIDATE_ORDERS = {"original", "shuffle"}
+LABEL_MODES = {"normal", "random"}
+
+HARD_NEGATIVE_MATCH_HINTS = {
+    "same_pinyin",
+    "exact_pinyin",
+    "full_pinyin",
+    "pinyin",
+    "same_abbr",
+    "abbr",
+    "short_pinyin",
+    "fuzzy",
+    "domain",
+    "context",
+    "confusable",
+}
 
 
 @dataclass
@@ -170,6 +199,36 @@ def split_name(source_doc_key: str, train_percent: int, val_percent: int) -> str
     return "test"
 
 
+def validate_choice(value: str, allowed: set[str], field_name: str) -> str:
+    if value not in allowed:
+        raise ValueError(f"{field_name} must be one of {sorted(allowed)}, got {value!r}")
+    return value
+
+
+def resolve_context_mode(args: argparse.Namespace, *, include_context: bool = True) -> str:
+    if not include_context or bool(getattr(args, "no_context", False)):
+        return "none"
+    mode = str(getattr(args, "context_mode", "online") or "online")
+    return validate_choice(mode, CONTEXT_MODES, "context_mode")
+
+
+def deterministic_shuffle(items: Sequence[Any], salt: str) -> List[Any]:
+    out = list(items)
+    rng = random.Random(int(stable_hash(salt)[:16], 16))
+    rng.shuffle(out)
+    return out
+
+
+def perturb_context(text: str, *, perturb: str, salt: str) -> str:
+    text = text or ""
+    perturb = validate_choice(perturb, CONTEXT_PERTURBS, "context_perturb")
+    if perturb == "none":
+        return text
+    if perturb == "empty":
+        return ""
+    return "".join(deterministic_shuffle(list(text), salt))
+
+
 def build_pair_text(
     *,
     context_before: str,
@@ -179,9 +238,22 @@ def build_pair_text(
     before_chars: int = Defaults.context_before_chars,
     after_chars: int = Defaults.context_after_chars,
     include_context: bool = True,
+    context_mode: str = "online",
+    context_perturb: str = "none",
+    sample_id: str = "",
 ) -> str:
-    before = (context_before or "")[-before_chars:] if include_context else ""
-    after = (context_after or "")[:after_chars] if include_context else ""
+    if not include_context:
+        context_mode = "none"
+    context_mode = validate_choice(context_mode, CONTEXT_MODES, "context_mode")
+    context_perturb = validate_choice(context_perturb, CONTEXT_PERTURBS, "context_perturb")
+    if context_mode == "none":
+        before = ""
+        after = ""
+    else:
+        before = (context_before or "")[-before_chars:]
+        after = (context_after or "")[:after_chars] if context_mode == "edit" else ""
+        before = perturb_context(before, perturb=context_perturb, salt=f"{sample_id}:before")
+        after = perturb_context(after, perturb=context_perturb, salt=f"{sample_id}:after")
     return (
         f"[context_before] {before}\n"
         f"[composing] {composing or ''}\n"
@@ -217,7 +289,7 @@ def _meta_from_legacy_feature(feature: dict, rank: int) -> CandidateMeta:
         freq=freq_value,
         source=str(feature.get("source", "unknown") or "unknown"),
         match_type=str(feature.get("match_type", "unknown") or "unknown"),
-        original_rank=int(feature.get("static_rank", rank) or rank),
+        original_rank=int(feature.get("static_rank", feature.get("original_rank", rank)) or rank),
     )
 
 
@@ -254,7 +326,7 @@ def parse_sample(obj: dict, line_no: int = 0) -> Tuple[Optional[NormalizedSample
         candidates.append(text)
         candidate_meta.append(meta)
 
-    legacy_features = obj.get("candidate_features") or []
+    legacy_features = obj.get("candidate_meta") or obj.get("candidate_features") or []
     if legacy_features and len(legacy_features) == len(candidates):
         candidate_meta = [
             _meta_from_legacy_feature(feature, rank)
@@ -343,9 +415,11 @@ def parse_sample(obj: dict, line_no: int = 0) -> Tuple[Optional[NormalizedSample
 def read_jsonl_samples(path: Path) -> Tuple[List[NormalizedSample], Counter]:
     samples: List[NormalizedSample] = []
     counters: Counter = Counter()
-    with path.open("r", encoding="utf-8") as file:
+    with path.open("r", encoding="utf-8-sig") as file:
         for line_no, line in enumerate(file, start=1):
+            counters["physical_lines"] += 1
             if not line.strip():
+                counters["blank_lines"] += 1
                 continue
             counters["read"] += 1
             try:
@@ -437,12 +511,299 @@ def topk_from_frequency(samples: Sequence[NormalizedSample]) -> Dict[str, float]
     }
 
 
+def topk_from_static_rank(samples: Sequence[NormalizedSample]) -> Dict[str, float]:
+    hits = {1: 0, 3: 0, 5: 0}
+    total = max(len(samples), 1)
+    usable = 0
+    for sample in samples:
+        usable += 1
+        ranked = sorted(
+            range(len(sample.candidates)),
+            key=lambda i: (
+                sample.candidate_meta[i].original_rank or i + 1,
+                i,
+            ),
+        )
+        for k in hits:
+            if sample.target_index in ranked[: min(k, len(ranked))]:
+                hits[k] += 1
+    return {
+        "usable": usable / total if samples else 0.0,
+        "top1": hits[1] / max(usable, 1),
+        "top3": hits[3] / max(usable, 1),
+        "top5": hits[5] / max(usable, 1),
+    }
+
+
 def random_baseline(samples: Sequence[NormalizedSample]) -> Dict[str, float]:
     total = max(len(samples), 1)
     out = {}
     for k in (1, 3, 5):
         out[f"top{k}"] = sum(min(k, len(s.candidates)) / len(s.candidates) for s in samples) / total
     return out
+
+
+def recall_by_candidate_position(samples: Sequence[NormalizedSample]) -> Dict[str, float]:
+    total = max(len(samples), 1)
+    out = {}
+    for k in (10, 30, 100):
+        hits = sum(1 for sample in samples if sample.target_index < min(k, len(sample.candidates)))
+        out[f"recall@{k}"] = hits / total
+    return out
+
+
+def target_text(sample: NormalizedSample) -> str:
+    return sample.candidates[sample.target_index]
+
+
+def context_suffix(sample: NormalizedSample, chars: int = 32) -> str:
+    return (sample.context_before or "")[-chars:]
+
+
+def candidates_set_key(sample: NormalizedSample) -> str:
+    return "\u241f".join(sorted(sample.candidates))
+
+
+def normalized_text(value: str) -> str:
+    return "".join(ch.lower() for ch in str(value or "") if not ch.isspace())
+
+
+def signature_raw_input_target(sample: NormalizedSample) -> str:
+    return stable_hash(json.dumps([sample.composing, target_text(sample)], ensure_ascii=False))
+
+
+def signature_context_suffix_raw_input_target(sample: NormalizedSample) -> str:
+    return stable_hash(
+        json.dumps([context_suffix(sample, 32), sample.composing, target_text(sample)], ensure_ascii=False)
+    )
+
+
+def signature_candidates_set_target(sample: NormalizedSample) -> str:
+    return stable_hash(json.dumps([candidates_set_key(sample), target_text(sample)], ensure_ascii=False))
+
+
+def signature_context_window_target(sample: NormalizedSample) -> str:
+    payload = [
+        (sample.context_before or "")[-128:],
+        target_text(sample),
+        (sample.context_after or "")[:64],
+    ]
+    return stable_hash(json.dumps(payload, ensure_ascii=False))
+
+
+def signature_near_context_window(sample: NormalizedSample) -> str:
+    payload = normalized_text(
+        f"{(sample.context_before or '')[-160:]}|{target_text(sample)}|{(sample.context_after or '')[:96]}"
+    )
+    return stable_hash(payload)
+
+
+def build_majority_target_table(
+    train_samples: Sequence[NormalizedSample],
+    key_fn: Any,
+) -> Dict[str, str]:
+    buckets: Dict[str, Counter] = defaultdict(Counter)
+    for sample in train_samples:
+        key = key_fn(sample)
+        if key:
+            buckets[key][target_text(sample)] += 1
+    return {
+        key: counts.most_common(1)[0][0]
+        for key, counts in buckets.items()
+        if counts
+    }
+
+
+def memory_baseline(
+    train_samples: Sequence[NormalizedSample],
+    eval_samples: Sequence[NormalizedSample],
+    key_fn: Any,
+) -> Dict[str, float]:
+    table = build_majority_target_table(train_samples, key_fn)
+    total = max(len(eval_samples), 1)
+    covered = 0
+    hits = 0
+    for sample in eval_samples:
+        key = key_fn(sample)
+        if key not in table:
+            continue
+        covered += 1
+        if table[key] == target_text(sample):
+            hits += 1
+    return {
+        "train_keys": float(len(table)),
+        "eval_samples": float(len(eval_samples)),
+        "covered": float(covered),
+        "coverage": covered / total,
+        "hit_on_covered": hits / max(covered, 1),
+        "top1_all": hits / total,
+    }
+
+
+def cross_split_overlap_counts(
+    samples_by_name: Dict[str, List[NormalizedSample]],
+    signature_fn: Any,
+) -> Dict[str, Any]:
+    sig_to_splits: Dict[str, set[str]] = defaultdict(set)
+    sig_to_examples: Dict[str, List[str]] = defaultdict(list)
+    for name, samples in samples_by_name.items():
+        for sample in samples:
+            sig = signature_fn(sample)
+            sig_to_splits[sig].add(name)
+            if len(sig_to_examples[sig]) < 3:
+                sig_to_examples[sig].append(sample.sample_id)
+    leaked = {sig: splits for sig, splits in sig_to_splits.items() if len(splits) > 1}
+    return {
+        "count": len(leaked),
+        "examples": [
+            {"signature": sig, "splits": sorted(splits), "sample_ids": sig_to_examples.get(sig, [])}
+            for sig, splits in list(leaked.items())[:10]
+        ],
+    }
+
+
+def train_eval_overlap_rate(
+    train_samples: Sequence[NormalizedSample],
+    eval_samples: Sequence[NormalizedSample],
+    signature_fn: Any,
+) -> float:
+    train_keys = {signature_fn(sample) for sample in train_samples}
+    if not eval_samples:
+        return 0.0
+    return sum(1 for sample in eval_samples if signature_fn(sample) in train_keys) / len(eval_samples)
+
+
+def classify_hard_negative(meta: CandidateMeta, target_meta: CandidateMeta) -> bool:
+    match_type = normalize_label(meta.match_type)
+    source = normalize_label(meta.source)
+    if any(hint in match_type for hint in HARD_NEGATIVE_MATCH_HINTS):
+        return True
+    if source in {"user_dict", "domain_dict", "recent_user", "global_high_freq"}:
+        return True
+    if meta.freq is not None and target_meta.freq is not None and meta.freq >= target_meta.freq:
+        return True
+    return False
+
+
+def candidate_generation_audit(samples: Sequence[NormalizedSample]) -> Dict[str, Any]:
+    target_positions = Counter()
+    target_match_types = Counter()
+    negative_match_types = Counter()
+    negative_sources = Counter()
+    total_negative_candidates = 0
+    hard_negative_candidates = 0
+    samples_without_hard_negative = 0
+    samples_with_high_freq_conflict = 0
+    samples_target_unique_known_match = 0
+    candidate_count_under_3 = 0
+
+    for sample in samples:
+        target_positions[sample.target_index] += 1
+        if len(sample.candidates) < 3:
+            candidate_count_under_3 += 1
+        target_meta = sample.candidate_meta[sample.target_index]
+        target_match = normalize_label(target_meta.match_type)
+        target_match_types[target_match] += 1
+        known_match_indices = [
+            i for i, meta in enumerate(sample.candidate_meta)
+            if normalize_label(meta.match_type) not in {"unknown", "none", ""}
+        ]
+        if target_match not in {"unknown", "none", ""} and known_match_indices == [sample.target_index]:
+            samples_target_unique_known_match += 1
+
+        hard_in_sample = 0
+        high_freq_conflict = False
+        for i, meta in enumerate(sample.candidate_meta):
+            if i == sample.target_index:
+                continue
+            total_negative_candidates += 1
+            negative_match_types[normalize_label(meta.match_type)] += 1
+            negative_sources[normalize_label(meta.source)] += 1
+            if classify_hard_negative(meta, target_meta):
+                hard_negative_candidates += 1
+                hard_in_sample += 1
+            if meta.freq is not None and target_meta.freq is not None and meta.freq >= target_meta.freq:
+                high_freq_conflict = True
+        if hard_in_sample == 0:
+            samples_without_hard_negative += 1
+        if high_freq_conflict:
+            samples_with_high_freq_conflict += 1
+
+    total = max(len(samples), 1)
+    return {
+        "target_position_distribution": distribution(target_positions),
+        "target_first_rate": target_positions[0] / total,
+        "candidate_count_under_3_rate": candidate_count_under_3 / total,
+        "target_match_type_distribution": distribution(target_match_types),
+        "negative_match_type_distribution": distribution(negative_match_types),
+        "negative_source_distribution": distribution(negative_sources),
+        "hard_negative_candidate_ratio": hard_negative_candidates / max(total_negative_candidates, 1),
+        "samples_without_hard_negative_rate": samples_without_hard_negative / total,
+        "target_unique_known_match_rate": samples_target_unique_known_match / total,
+        "high_freq_conflict_sample_rate": samples_with_high_freq_conflict / total,
+    }
+
+
+def split_memory_baselines(samples_by_name: Dict[str, List[NormalizedSample]]) -> Dict[str, Dict[str, Dict[str, float]]]:
+    train_samples = samples_by_name.get("train", [])
+    if not train_samples:
+        return {}
+    key_fns = {
+        "raw_input_to_target": lambda sample: sample.composing,
+        "context_suffix32_raw_input_to_target": lambda sample: f"{context_suffix(sample, 32)}\u241f{sample.composing}",
+        "candidates_set_to_target": candidates_set_key,
+    }
+    out: Dict[str, Dict[str, Dict[str, float]]] = {}
+    for split_name_value, samples in samples_by_name.items():
+        if split_name_value == "train":
+            continue
+        out[split_name_value] = {
+            key_name: memory_baseline(train_samples, samples, key_fn)
+            for key_name, key_fn in key_fns.items()
+        }
+    return out
+
+
+def audit_red_lines(
+    samples_by_name: Dict[str, List[NormalizedSample]],
+    overlap_summary: Dict[str, Dict[str, Any]],
+    memory_summary: Dict[str, Dict[str, Dict[str, float]]],
+) -> List[str]:
+    findings: List[str] = []
+    for name, samples in samples_by_name.items():
+        if not samples:
+            continue
+        candidate0 = topk_from_rank(
+            [sample.target_index for sample in samples],
+            [len(sample.candidates) for sample in samples],
+        )["top1"]
+        if candidate0 > 0.95:
+            findings.append(f"{name}: candidates[0] baseline top1 {candidate0:.4f} > 0.95")
+
+    if overlap_summary.get("source_doc_key", {}).get("count", 0) > 0:
+        findings.append("source_doc_key crosses splits; split must be rebuilt")
+    if overlap_summary.get("exact_sample", {}).get("count", 0) > 0:
+        findings.append("exact sample signatures cross splits; split must be rebuilt")
+
+    train_samples = samples_by_name.get("train", [])
+    if train_samples:
+        for split_name_value, samples in samples_by_name.items():
+            if split_name_value == "train" or not samples:
+                continue
+            raw_target_overlap = train_eval_overlap_rate(train_samples, samples, signature_raw_input_target)
+            if raw_target_overlap > 0.30:
+                findings.append(
+                    f"train-{split_name_value}: raw_input+target overlap {raw_target_overlap:.4f} > 0.30"
+                )
+            suffix_memory = memory_summary.get(split_name_value, {}).get(
+                "context_suffix32_raw_input_to_target", {}
+            )
+            if float(suffix_memory.get("top1_all", 0.0)) > 0.90:
+                findings.append(
+                    f"train-{split_name_value}: context_suffix32+raw_input memory "
+                    f"top1_all {suffix_memory.get('top1_all', 0.0):.4f} > 0.90"
+                )
+    return findings
 
 
 def distribution(counter: Counter, limit: int = 20) -> List[Tuple[Any, int]]:
@@ -461,6 +822,25 @@ def make_audit_markdown(
     lines.append("本报告用于判断数据是否有资格进入上下文选词模型训练。")
     lines.append("")
     all_samples = [sample for samples in samples_by_name.values() for sample in samples]
+    overlap_summary: Dict[str, Dict[str, Any]] = {}
+    memory_summary = split_memory_baselines(samples_by_name)
+    if len(samples_by_name) > 1:
+        overlap_summary = {
+            "source_doc_key": cross_split_overlap_counts(samples_by_name, lambda sample: sample.source_doc_key),
+            "exact_sample": cross_split_overlap_counts(
+                samples_by_name, lambda sample: sample_signature(sample, include_context=True)
+            ),
+            "no_context_sample": cross_split_overlap_counts(
+                samples_by_name, lambda sample: sample_signature(sample, include_context=False)
+            ),
+            "raw_input_target": cross_split_overlap_counts(samples_by_name, signature_raw_input_target),
+            "context_suffix32_raw_input_target": cross_split_overlap_counts(
+                samples_by_name, signature_context_suffix_raw_input_target
+            ),
+            "candidates_set_target": cross_split_overlap_counts(samples_by_name, signature_candidates_set_target),
+            "context_window_target": cross_split_overlap_counts(samples_by_name, signature_context_window_target),
+            "near_context_window": cross_split_overlap_counts(samples_by_name, signature_near_context_window),
+        }
     lines.append("## 总览")
     lines.append("")
     lines.append(f"- kept samples: {len(all_samples)}")
@@ -497,9 +877,19 @@ def make_audit_markdown(
         rank_base = topk_from_rank(target_indices, candidate_counts)
         freq_base = topk_from_frequency(samples)
         rand_base = random_baseline(samples)
-        lines.append(f"- original-rank: {json.dumps(rank_base, ensure_ascii=False)}")
+        static_rank_base = topk_from_static_rank(samples)
+        recall_base = recall_by_candidate_position(samples)
+        lines.append(f"- candidates[0]: {json.dumps(rank_base, ensure_ascii=False)}")
+        lines.append(f"- static-rank: {json.dumps(static_rank_base, ensure_ascii=False)}")
         lines.append(f"- frequency: {json.dumps(freq_base, ensure_ascii=False)}")
         lines.append(f"- random: {json.dumps(rand_base, ensure_ascii=False)}")
+        lines.append(f"- candidate recall buckets: {json.dumps(recall_base, ensure_ascii=False)}")
+        lines.append("")
+        lines.append("### Candidate generator audit")
+        lines.append("")
+        lines.append("```json")
+        lines.append(json.dumps(candidate_generation_audit(samples), ensure_ascii=False, indent=2))
+        lines.append("```")
         lines.append("")
         lines.append("### Distributions")
         lines.append("")
@@ -521,24 +911,10 @@ def make_audit_markdown(
     if len(samples_by_name) > 1:
         lines.append("## Split leakage checks")
         lines.append("")
-        doc_to_splits: Dict[str, set] = defaultdict(set)
-        sig_to_splits: Dict[str, set] = defaultdict(set)
-        noctx_to_splits: Dict[str, set] = defaultdict(set)
-        for name, samples in samples_by_name.items():
-            for sample in samples:
-                doc_to_splits[sample.source_doc_key].add(name)
-                sig_to_splits[sample_signature(sample, include_context=True)].add(name)
-                noctx_to_splits[sample_signature(sample, include_context=False)].add(name)
-        leaked_docs = {k: v for k, v in doc_to_splits.items() if len(v) > 1}
-        leaked_sigs = {k: v for k, v in sig_to_splits.items() if len(v) > 1}
-        leaked_noctx = {k: v for k, v in noctx_to_splits.items() if len(v) > 1}
-        lines.append(f"- source_doc_key crossing splits: {len(leaked_docs)}")
-        lines.append(f"- exact sample signatures crossing splits: {len(leaked_sigs)}")
-        lines.append(f"- no-context signatures crossing splits: {len(leaked_noctx)}")
-        if leaked_docs:
-            lines.append("- sample leaked source_doc_key examples:")
-            for key, splits in list(leaked_docs.items())[:10]:
-                lines.append(f"  - {key}: {sorted(splits)}")
+        for key, summary in overlap_summary.items():
+            lines.append(f"- {key} crossing splits: {summary['count']}")
+            if summary["examples"]:
+                lines.append(f"  examples: {json.dumps(summary['examples'], ensure_ascii=False)}")
         lines.append("")
 
     lines.append("## 结论建议")
@@ -548,13 +924,30 @@ def make_audit_markdown(
     lines.append("- 如果纯上下文模型没有明显超过 baseline，应优先修数据，而不是堆模型。")
     lines.append("- 如果无上下文 ablation 接近正常模型，应视为任务定义或数据切分存在问题。")
     lines.append("")
+    if memory_summary:
+        lines.append("## Train-to-eval memorization baselines")
+        lines.append("")
+        lines.append("```json")
+        lines.append(json.dumps(memory_summary, ensure_ascii=False, indent=2))
+        lines.append("```")
+        lines.append("")
+
+    red_lines = audit_red_lines(samples_by_name, overlap_summary, memory_summary)
+    lines.append("## Red-line findings")
+    lines.append("")
+    if red_lines:
+        for finding in red_lines:
+            lines.append(f"- {finding}")
+    else:
+        lines.append("- No audit red lines triggered by static data checks.")
+    lines.append("")
     return "\n".join(lines)
 
 
 def command_audit_data(args: argparse.Namespace) -> None:
     samples_by_name: Dict[str, List[NormalizedSample]] = {}
     counters_by_name: Dict[str, Counter] = {}
-    if args.input:
+    if getattr(args, "input", None):
         path = Path(args.input)
         samples, counters = read_jsonl_samples(path)
         samples_by_name[path.stem] = samples
@@ -664,15 +1057,50 @@ class ContextRerankerModel(nn.Module if nn is not None else object):
         return self.scorer(pooled).squeeze(-1)
 
 
+def candidate_order_indices(sample: NormalizedSample, candidate_order: str) -> List[int]:
+    candidate_order = validate_choice(candidate_order, CANDIDATE_ORDERS, "candidate_order")
+    order = list(range(len(sample.candidates)))
+    if candidate_order == "shuffle":
+        order = deterministic_shuffle(order, f"{sample.sample_id}:candidate_order")
+    return order
+
+
+def target_index_for_order(sample: NormalizedSample, order: Sequence[int], label_mode: str) -> int:
+    label_mode = validate_choice(label_mode, LABEL_MODES, "label_mode")
+    if label_mode == "random":
+        return stable_bucket(f"{sample.sample_id}:random_label", len(order))
+    return list(order).index(sample.target_index)
+
+
 def make_collate_fn(tokenizer: Any, args: argparse.Namespace, *, include_context: bool = True):
     def collate(samples: List[NormalizedSample]) -> Dict[str, Any]:
         texts: List[str] = []
         group_sizes: List[int] = []
         target_indices: List[int] = []
+        candidate_orders: List[List[int]] = []
+        context_mode = resolve_context_mode(args, include_context=include_context)
+        context_perturb = validate_choice(
+            str(getattr(args, "context_perturb", "none") or "none"),
+            CONTEXT_PERTURBS,
+            "context_perturb",
+        )
+        candidate_order = validate_choice(
+            str(getattr(args, "candidate_order", "original") or "original"),
+            CANDIDATE_ORDERS,
+            "candidate_order",
+        )
+        label_mode = validate_choice(
+            str(getattr(args, "label_mode", "normal") or "normal"),
+            LABEL_MODES,
+            "label_mode",
+        )
         for sample in samples:
-            group_sizes.append(len(sample.candidates))
-            target_indices.append(sample.target_index)
-            for candidate in sample.candidates:
+            order = candidate_order_indices(sample, candidate_order)
+            candidate_orders.append(order)
+            group_sizes.append(len(order))
+            target_indices.append(target_index_for_order(sample, order, label_mode))
+            for candidate_index in order:
+                candidate = sample.candidates[candidate_index]
                 texts.append(
                     build_pair_text(
                         context_before=sample.context_before,
@@ -682,6 +1110,9 @@ def make_collate_fn(tokenizer: Any, args: argparse.Namespace, *, include_context
                         before_chars=int(args.context_before_chars),
                         after_chars=int(args.context_after_chars),
                         include_context=include_context,
+                        context_mode=context_mode,
+                        context_perturb=context_perturb,
+                        sample_id=sample.sample_id,
                     )
                 )
         encoded = tokenizer(
@@ -695,6 +1126,7 @@ def make_collate_fn(tokenizer: Any, args: argparse.Namespace, *, include_context
             "encoded": encoded,
             "group_sizes": group_sizes,
             "target_indices": target_indices,
+            "candidate_orders": candidate_orders,
             "samples": samples,
         }
     return collate
@@ -728,11 +1160,70 @@ def score_topk(scores: Any, group_sizes: Sequence[int], target_indices: Sequence
     return {f"top{k}": value for k, value in hits.items()}
 
 
-def evaluate_model(model: Any, loader: Any, device: Any) -> Dict[str, float]:
+def score_group_metrics(
+    scores: Any,
+    group_sizes: Sequence[int],
+    target_indices: Sequence[int],
+    candidate_orders: Sequence[Sequence[int]],
+    samples: Sequence[NormalizedSample],
+) -> Tuple[Dict[str, int], Counter]:
+    hits = {1: 0, 3: 0, 5: 0}
+    product = Counter()
+    cursor = 0
+    for sample, size, target_index, order in zip(samples, group_sizes, target_indices, candidate_orders):
+        group = scores[cursor: cursor + size]
+        ranked_positions = torch.argsort(group, descending=True).detach().cpu().tolist()
+        for k in hits:
+            if int(target_index) in ranked_positions[: min(k, size)]:
+                hits[k] += 1
+
+        predicted_position = int(ranked_positions[0]) if ranked_positions else 0
+        predicted_original_index = int(order[predicted_position]) if order else 0
+        original_top1_correct = sample.target_index == 0
+        model_actual_correct = predicted_original_index == sample.target_index
+        if original_top1_correct:
+            product["original_top1_correct_total"] += 1
+            if model_actual_correct:
+                product["keep_when_original_top1_correct"] += 1
+            else:
+                product["harm_when_original_top1_correct"] += 1
+        else:
+            product["original_top1_wrong_total"] += 1
+            if model_actual_correct:
+                product["fix_when_original_top1_wrong"] += 1
+        cursor += size
+    return {f"top{k}": value for k, value in hits.items()}, product
+
+
+def finalize_product_metrics(product: Counter) -> Dict[str, Any]:
+    correct_total = int(product["original_top1_correct_total"])
+    wrong_total = int(product["original_top1_wrong_total"])
+    keep = int(product["keep_when_original_top1_correct"])
+    harm = int(product["harm_when_original_top1_correct"])
+    fix = int(product["fix_when_original_top1_wrong"])
+    keep_rate = keep / max(correct_total, 1)
+    harm_rate = harm / max(correct_total, 1)
+    fix_rate = fix / max(wrong_total, 1)
+    recommendation = "reject_default_enable" if harm_rate > fix_rate else "no_product_harm_red_line"
+    return {
+        "original_top1_correct_total": correct_total,
+        "original_top1_wrong_total": wrong_total,
+        "keep_when_original_top1_correct": keep_rate,
+        "fix_when_original_top1_wrong": fix_rate,
+        "harm_when_original_top1_correct": harm_rate,
+        "keep_count": keep,
+        "fix_count": fix,
+        "harm_count": harm,
+        "default_enable_recommendation": recommendation,
+    }
+
+
+def evaluate_model(model: Any, loader: Any, device: Any) -> Dict[str, Any]:
     model.eval()
     total_loss = 0.0
     total_samples = 0
     hits = Counter()
+    product = Counter()
     with torch.inference_mode():
         for batch in loader:
             batch = move_batch(batch, device)
@@ -746,16 +1237,26 @@ def evaluate_model(model: Any, loader: Any, device: Any) -> Dict[str, float]:
             batch_size = len(batch["target_indices"])
             total_loss += float(loss.item()) * batch_size
             total_samples += batch_size
-            hits.update(score_topk(scores, batch["group_sizes"], batch["target_indices"]))
+            batch_hits, batch_product = score_group_metrics(
+                scores,
+                batch["group_sizes"],
+                batch["target_indices"],
+                batch["candidate_orders"],
+                batch["samples"],
+            )
+            hits.update(batch_hits)
+            product.update(batch_product)
     denom = max(total_samples, 1)
     model.train()
-    return {
+    metrics = {
         "loss": total_loss / denom,
         "top1": hits["top1"] / denom,
         "top3": hits["top3"] / denom,
         "top5": hits["top5"] / denom,
         "samples": float(total_samples),
     }
+    metrics.update(finalize_product_metrics(product))
+    return metrics
 
 
 def save_checkpoint(model: Any, tokenizer: Any, output_dir: Path, config: dict) -> None:
@@ -795,6 +1296,76 @@ def load_checkpoint(checkpoint_dir: Path, device: Any) -> Tuple[Any, Any, dict]:
     return model, tokenizer, config
 
 
+def make_runtime_eval_args(config: dict, args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    values = {
+        "max_length": int(config.get("max_length", Defaults.max_length)),
+        "context_before_chars": int(config.get("context_before_chars", Defaults.context_before_chars)),
+        "context_after_chars": int(config.get("context_after_chars", Defaults.context_after_chars)),
+        "context_mode": str(getattr(args, "context_mode", "online") or "online"),
+        "context_perturb": str(getattr(args, "context_perturb", "none") or "none"),
+        "candidate_order": str(getattr(args, "candidate_order", "original") or "original"),
+        "label_mode": "normal",
+        "no_context": bool(getattr(args, "no_context", False)),
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def evaluate_variant(
+    *,
+    model: Any,
+    tokenizer: Any,
+    dataset: RankingJsonlDataset,
+    config: dict,
+    args: argparse.Namespace,
+    device: Any,
+    context_mode: str,
+    context_perturb: str = "none",
+    candidate_order: str = "original",
+) -> Dict[str, Any]:
+    eval_args = make_runtime_eval_args(
+        config,
+        args,
+        context_mode=context_mode,
+        context_perturb=context_perturb,
+        candidate_order=candidate_order,
+        no_context=(context_mode == "none"),
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=int(args.batch_size),
+        shuffle=False,
+        collate_fn=make_collate_fn(tokenizer, eval_args, include_context=context_mode != "none"),
+        num_workers=0,
+    )
+    return evaluate_model(model, loader, device)
+
+
+def eval_red_lines(
+    *,
+    sanity_metrics: Dict[str, Dict[str, Any]],
+    candidate0_baseline: Dict[str, float],
+) -> List[str]:
+    findings: List[str] = []
+    if candidate0_baseline.get("top1", 0.0) > 0.95:
+        findings.append(
+            f"candidates[0] baseline top1 {candidate0_baseline.get('top1', 0.0):.4f} > 0.95"
+        )
+    online = sanity_metrics.get("online_context", {})
+    no_context = sanity_metrics.get("no_context", {})
+    if online and no_context:
+        delta = float(online.get("top1", 0.0)) - float(no_context.get("top1", 0.0))
+        if abs(delta) < 0.01:
+            findings.append(f"no-context top1 is within 1% of online-context top1 (delta={delta:.4f})")
+    primary = sanity_metrics.get("primary", online)
+    if primary:
+        harm = float(primary.get("harm_when_original_top1_correct", 0.0))
+        fix = float(primary.get("fix_when_original_top1_wrong", 0.0))
+        if harm > fix:
+            findings.append(f"product harm rate {harm:.4f} is higher than fix rate {fix:.4f}")
+    return findings
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     require_training_deps()
@@ -812,6 +1383,8 @@ def command_train(args: argparse.Namespace) -> None:
     model = ContextRerankerModel(encoder, dropout=float(args.dropout)).to(device)
     train_ds = RankingJsonlDataset(args.train)
     val_ds = RankingJsonlDataset(args.val)
+    if bool(args.no_context):
+        args.context_mode = "none"
     collate = make_collate_fn(tokenizer, args, include_context=not args.no_context)
     train_loader = DataLoader(
         train_ds,
@@ -837,6 +1410,12 @@ def command_train(args: argparse.Namespace) -> None:
     )
     print(f"train original-rank baseline: {json.dumps(train_rank_base)}")
     print(f"val original-rank baseline: {json.dumps(val_rank_base)}")
+    print(
+        "train sanity mode: "
+        f"context_mode={resolve_context_mode(args, include_context=not args.no_context)} "
+        f"context_perturb={args.context_perturb} candidate_order={args.candidate_order} "
+        f"label_mode={args.label_mode}"
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
     total_steps = max(1, len(train_loader) * int(args.epochs))
     warmup_steps = int(total_steps * float(args.warmup_ratio))
@@ -853,6 +1432,10 @@ def command_train(args: argparse.Namespace) -> None:
         "context_before_chars": int(args.context_before_chars),
         "context_after_chars": int(args.context_after_chars),
         "dropout": float(args.dropout),
+        "context_mode": resolve_context_mode(args, include_context=not args.no_context),
+        "context_perturb": str(args.context_perturb),
+        "candidate_order": str(args.candidate_order),
+        "label_mode": str(args.label_mode),
         "no_context": bool(args.no_context),
         "data_contract": "context_reranker_v2",
         "side_features_used_by_model": False,
@@ -906,30 +1489,96 @@ def command_eval(args: argparse.Namespace) -> None:
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     checkpoint_dir = Path(args.checkpoint)
     model, tokenizer, config = load_checkpoint(checkpoint_dir, device)
-    eval_args = argparse.Namespace(
-        max_length=int(config.get("max_length", Defaults.max_length)),
-        context_before_chars=int(config.get("context_before_chars", Defaults.context_before_chars)),
-        context_after_chars=int(config.get("context_after_chars", Defaults.context_after_chars)),
-    )
+    if bool(args.no_context):
+        args.context_mode = "none"
     dataset = RankingJsonlDataset(args.data)
-    loader = DataLoader(
-        dataset,
-        batch_size=int(args.batch_size),
-        shuffle=False,
-        collate_fn=make_collate_fn(tokenizer, eval_args, include_context=not args.no_context),
-        num_workers=0,
+    primary_metrics = evaluate_variant(
+        model=model,
+        tokenizer=tokenizer,
+        dataset=dataset,
+        config=config,
+        args=args,
+        device=device,
+        context_mode=str(args.context_mode),
+        context_perturb=str(args.context_perturb),
+        candidate_order=str(args.candidate_order),
     )
-    metrics = evaluate_model(model, loader, device)
+    sanity_metrics = {
+        "primary": primary_metrics,
+        "online_context": evaluate_variant(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            args=args,
+            device=device,
+            context_mode="online",
+        ),
+        "edit_context": evaluate_variant(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            args=args,
+            device=device,
+            context_mode="edit",
+        ),
+        "no_context": evaluate_variant(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            args=args,
+            device=device,
+            context_mode="none",
+        ),
+        "shuffled_context": evaluate_variant(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            args=args,
+            device=device,
+            context_mode="online",
+            context_perturb="shuffle",
+        ),
+        "shuffled_candidates": evaluate_variant(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            args=args,
+            device=device,
+            context_mode="online",
+            candidate_order="shuffle",
+        ),
+    }
     rank_base = topk_from_rank(
         [sample.target_index for sample in dataset.samples],
         [len(sample.candidates) for sample in dataset.samples],
     )
+    static_rank_base = topk_from_static_rank(dataset.samples)
     freq_base = topk_from_frequency(dataset.samples)
+    rand_base = random_baseline(dataset.samples)
+    recall_base = recall_by_candidate_position(dataset.samples)
     print(json.dumps({
-        "metrics": metrics,
-        "original_rank_baseline": rank_base,
+        "selected_eval": {
+            "context_mode": args.context_mode,
+            "context_perturb": args.context_perturb,
+            "candidate_order": args.candidate_order,
+        },
+        "metrics": primary_metrics,
+        "sanity_metrics": sanity_metrics,
+        "dummy_first_baseline": rank_base,
+        "static_rank_baseline": static_rank_base,
         "frequency_baseline": freq_base,
-        "no_context_eval": bool(args.no_context),
+        "random_baseline": rand_base,
+        "candidate_recall": recall_base,
+        "candidate_generation_audit": candidate_generation_audit(dataset.samples),
+        "red_line_findings": eval_red_lines(
+            sanity_metrics=sanity_metrics,
+            candidate0_baseline=rank_base,
+        ),
     }, ensure_ascii=False, indent=2))
 
 
@@ -943,6 +1592,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--test")
     audit.add_argument("--report")
     audit.set_defaults(func=command_audit_data)
+    audit_splits = sub.add_parser("audit-splits", help="Audit train/val/test JSONL splits")
+    audit_splits.add_argument("--train", required=True)
+    audit_splits.add_argument("--val", required=True)
+    audit_splits.add_argument("--test")
+    audit_splits.add_argument("--report")
+    audit_splits.set_defaults(func=command_audit_data)
     split = sub.add_parser("split-data", help="Normalize and split JSONL by source_doc_key")
     split.add_argument("--input", required=True)
     split.add_argument("--output-dir", required=True)
@@ -969,13 +1624,20 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--log-every", type=int, default=50)
     train.add_argument("--seed", type=int, default=Defaults.seed)
     train.add_argument("--device")
-    train.add_argument("--no-context", action="store_true", help="Ablation: remove context from model input")
+    train.add_argument("--context-mode", choices=sorted(CONTEXT_MODES), default="online")
+    train.add_argument("--context-perturb", choices=sorted(CONTEXT_PERTURBS), default="none")
+    train.add_argument("--candidate-order", choices=sorted(CANDIDATE_ORDERS), default="original")
+    train.add_argument("--label-mode", choices=sorted(LABEL_MODES), default="normal")
+    train.add_argument("--no-context", action="store_true", help="Backward-compatible alias for --context-mode none")
     train.set_defaults(func=command_train)
     ev = sub.add_parser("eval", help="Evaluate checkpoint and print baseline comparisons")
     ev.add_argument("--data", required=True)
     ev.add_argument("--checkpoint", required=True)
     ev.add_argument("--batch-size", type=int, default=Defaults.eval_batch_size)
     ev.add_argument("--device")
+    ev.add_argument("--context-mode", choices=sorted(CONTEXT_MODES), default="online")
+    ev.add_argument("--context-perturb", choices=sorted(CONTEXT_PERTURBS), default="none")
+    ev.add_argument("--candidate-order", choices=sorted(CANDIDATE_ORDERS), default="original")
     ev.add_argument("--no-context", action="store_true")
     ev.set_defaults(func=command_eval)
     return parser

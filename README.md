@@ -192,3 +192,21 @@
 - 不写入明文凭据和用户隐私样本。
 - 不为了短期演示关闭校验、吞异常或硬编码路径。
 - 涉及训练数据、模型导出、推理接口时必须同步更新文档和验证记录。
+
+## Context reranker v2 审计入口
+
+`training/context_reranker_v2.py` 是用于证明上下文重排能力的干净实验台，不是最终生产输入法模型。默认在线模式只使用 `context_before`、`composing` 和 `candidate`；`context_after` 只用于句中编辑、离线纠错或已有文本重排场景。
+
+常用命令：
+
+```bash
+python training/context_reranker_v2.py audit-splits --train <train.jsonl> --val <val.jsonl> --test <test.jsonl> --report <audit.md>
+python training/context_reranker_v2.py train --train <train.jsonl> --val <val.jsonl> --output-dir <checkpoint> --context-mode online
+python training/context_reranker_v2.py train --train <train.jsonl> --val <val.jsonl> --output-dir <checkpoint-random-label> --label-mode random
+python training/context_reranker_v2.py eval --data <val.jsonl> --checkpoint <checkpoint> --context-mode online
+python training/context_reranker_v2.py eval --data <val.jsonl> --checkpoint <checkpoint> --context-mode none
+python training/context_reranker_v2.py eval --data <val.jsonl> --checkpoint <checkpoint> --context-perturb shuffle
+python training/context_reranker_v2.py eval --data <val.jsonl> --checkpoint <checkpoint> --candidate-order shuffle
+```
+
+审计报告必须优先解释异常高分来源：`candidates[0]`、`static_rank`、`freq`、random、记忆 baseline、split overlap、候选生成器偏置、困难负例比例、no-context/shuffled-context/shuffled-candidates sanity，以及原候选第一正确时的保持率、错误时的纠错率和误伤率。

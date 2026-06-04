@@ -142,3 +142,58 @@ OpenIME 与 PinyinGPT/Transformers4IME 的经验说明，神经输入法训练�
 - 不要把目标词、目标拼音、target 字段拼进模型输入。
 - 新增复杂功能前先补 audit 和 baseline。
 - 输出详细日志，尤其记录数据被过滤、修复、切分和 baseline 结果。
+
+
+## 10. 0.995 异常高分审计口径
+
+如果 reranker 在验证集上出现接近 0.995 的 top1，第一反应不应是继续堆模型，而应先证明这个数字来自哪里。旧 `plan1_reranker.py` 最大问题不是“用了规则和强特征”，而是没有把规则能力、候选原序能力、词频能力、记忆能力、上下文能力拆开计量。
+
+必须固定报告以下数字：
+
+- `candidates[0]` baseline top1/top3/top5。
+- random baseline top1/top3/top5。
+- `static_rank` baseline top1/top3/top5。
+- `freq` baseline top1/top3/top5。
+- `raw_input -> target` 记忆 baseline。
+- `context_suffix_32 + raw_input -> target` 记忆 baseline。
+- `candidates_set -> target` 记忆 baseline。
+- no-context model top1/top3/top5。
+- shuffled-context top1/top3/top5。
+- shuffled-candidates top1/top3/top5。
+- dummy-first model top1/top3/top5。
+
+必须固定审计 split 泄漏：完整样本重复、`raw_input + target` 重复、`context_suffix_32 + raw_input + target` 重复、`candidates_set + target` 重复、`source_doc_key` 重复、原句/段落/模板级签名重复，以及近重复上下文签名跨 split 风险。
+
+必须固定审计候选生成器：target 是否被固定插入 candidates、target 插入位置是否有偏置、target 是否是唯一能匹配拼音或简拼的候选、负例是否随机低质、target 是否总是唯一正常词、候选原始 rank 是否已经近似标签、困难负例比例是否足够。
+
+必须审计评估链路本身：eval loader 真的读取 val/test，文件物理行数、有效样本数和报告样本数一致，label 与 candidates 没有错位，topK 排序方向正确，padding 没有参与排序，`target_index` 没有被错误重置成 0，batch 内样本没有错位，target 文本、target 拼音或 teacher forcing 信息没有进入 eval 输入。
+
+硬 sanity check：随机打乱 label 后训练，val top1 应接近 random baseline；dummy model 永远选第一个候选，用来暴露候选顺序偏置；打乱候选顺序后评估，用来暴露 rank 依赖和 label 错位；打乱 context 后评估，用来判断上下文是否真的有贡献；清空 context 后评估，用来判断模型是否只学了 composing、candidate 或候选顺序。
+
+红线：
+
+- 如果 `candidates[0]` baseline top1 > 0.95，当前 val 不适合证明 reranker 能力。
+- 如果 no-context top1 与 full/online-context top1 差距 < 1%，上下文贡献未被证明。
+- 如果 train-val `raw_input + target` overlap > 30%，随机切分风险极高。
+- 如果 `context_suffix_32 + raw_input` 记忆 baseline > 0.90，基本可判定泄漏或模板化。
+- 如果 exact sample overlap 或 `source_doc_key` 跨 split > 0，split 必须重做。
+- 如果随机标签训练仍显著高于 random baseline，评估或训练链路疑似错误。
+- 如果 hard-negative 子集 top1 大幅低于普通 val，普通 val 太简单，不能支撑 0.995 结论。
+
+## 11. v2-clean 与 production hybrid 的边界
+
+`context_reranker_v2.py` 的第一身份是 clean context 实验台，不是最终生产模型。它的目标是隔离并证明：在不依赖 `static_rank`、`freq`、`source`、`domain`、用户词频等强旁路特征时，`context_before` 是否真的能提升候选重排。
+
+两条路线必须分开：
+
+- `v2-clean`：只看 `context_before`、`composing`、`candidate`。默认在线主任务不使用 `context_after`。`context_after` 只属于句中编辑、已有文本重排、离线纠错等场景。
+- `production hybrid`：在 clean 结论成立后，允许加入候选原序、全局词频、领域词频、用户词频、最近上屏、用户词典、domain 等特征，但必须做 `rank only`、`context only`、`side features only`、`context + side features` 消融。
+
+真实输入法最终一定是混合系统。禁止把“第一阶段去掉强特征”误读成“生产模型永远不能使用词频、原始 rank 或用户记忆”。这些特征是合法产品信号，只是不能用来证明模型学会了上下文。
+
+在线评估必须分两层：
+
+- 候选召回：target 是否进入 top10/top30/top100。召回失败不算 reranker 的错，但必须单独统计。
+- 候选重排：只在召回成功的候选集合内统计 top1/top3、MRR、NDCG、误伤率和纠错率。
+
+产品体验指标必须包含：原始 rank top1 正确时模型保持正确的比例；原始 rank top1 错误时模型纠正的比例；原始 rank top1 正确却被模型挪错的误伤比例。如果纠错收益低于误伤，reranker 不适合默认启用，即使整体 top1 看起来提升。
